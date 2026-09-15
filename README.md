@@ -45,6 +45,7 @@ npm start          # 启动后访问 http://127.0.0.1:3737
 ```
 
 - 默认运行在**模拟模式**（无 LLM Key，回复由本地规则生成，演示链路用）。
+- 默认绑定 `127.0.0.1:3737`，可用 `HOST` / `PORT` 环境变量覆盖（如 `PORT=8080 npm start`）。
 
 ### 点击配置 LLM（界面内，保存即生效）
 
@@ -58,7 +59,7 @@ npm start          # 启动后访问 http://127.0.0.1:3737
 | API Key | 保存后打码显示（`sk-****xxxx`），留空表示保持不变——仅内置模式使用 |
 | 模型 | 支持两种方式：点击 **「↻ 拉取列表」** 从网关拉取（`GET /models`）后用 **select 下拉选择**；或点击 **「✏️ 手动输入」** 自由填写任意模型名（两种模式值互相同步）——仅内置模式使用 |
 
-支持 **「测试连接」**（用表单当前值发一条真实请求）与 **「恢复默认」**（清除配置回到模拟模式）。配置持久化在 `data/llm-config.json`（已 gitignore），无需重启服务、无需环境变量；环境变量 `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_TYPE` 仅作为未配置时的默认值。
+支持 **「测试连接」**（用表单当前值发一条真实请求）与 **「恢复默认」**（清除配置回到模拟模式）。配置持久化在 `data/llm-config.json`（已 gitignore），无需重启服务、无需环境变量；环境变量仅作为未配置时的默认值：`LLM_API_KEY`（别名 `OPENAI_API_KEY`）、`LLM_BASE_URL`（别名 `OPENAI_BASE_URL`）、`LLM_MODEL`、`LLM_API_TYPE`、`AGENT_MODE`（`builtin` / `pi`，默认 `builtin`）。
 
 ## 模拟 CLI 用法
 
