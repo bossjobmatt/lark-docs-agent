@@ -1,6 +1,6 @@
 # Lark 文档助手（本地演示）
 
-本地启动一个 Web 服务：用户在输入框中粘贴 **飞书/Lark 文档链接 + 问题**，AI Agent 调用**本地 Lark CLI** 读取文档后回答，支持**多轮对话**与 **Markdown 渲染**。
+本地启动一个 Web 服务：用户在输入框中粘贴 **飞书/Lark 文档链接 + 问题**，AI Agent 调用**本地 Lark CLI** 读取文档后回答，支持**流式输出**、**多轮对话**与 **Markdown 渲染**。
 
 > 本仓库内置一个**模拟版 lark CLI**（`bin/lark`），无需真实安装与鉴权即可跑通全链路；
 > 通过 `LARK_CLI` 环境变量可无缝替换为真实 CLI。
@@ -101,6 +101,7 @@ npm run lark -- doc search 上线                 # 关键词搜索
 | GET | `/api/examples` | 示例文档列表（真实经 CLI `doc list` 取得） |
 | GET | `/api/history?sessionId=` | 取会话历史 |
 | POST | `/api/chat` | `{ sessionId?, message }` → 回复 + 完整历史 |
+| POST | `/api/chat/stream` | 流式对话：NDJSON 事件行（`start` / `tool` / `delta` / `done` / `error`），`done` 携带完整回复（含渲染 HTML） |
 | POST | `/api/session/clear` | 清空会话 |
 | GET | `/api/llm/config` | 读 LLM 配置（API Key 打码） |
 | POST | `/api/llm/config` | 保存 LLM 配置，保存即生效 |
@@ -120,7 +121,8 @@ npm run lark -- doc search 上线                 # 关键词搜索
 6. 模型字段：点「拉取列表」经 `GET /models` 取回后以下拉列表选择，或切换「手动输入」自由填写，双模式值同步；
 7. **pi Agent 模式**：system prompt 规则驱动，模型自主调用 `lark_doc_get` 读取文档并回答；同会话追问无需重复发链接（会话记忆）；SDK 缺失时自动降级为内置编排并在回复中提示；
 8. **无 pi 安装环境**：以假 HOME（无 `~/.pi`）+ 离线模式启动服务，仅凭界面配置的凭据跑通 pi 模式全流程（首问调工具、追问靠会话记忆、UI 徽标正常），证明 pi 模式零依赖本地安装的 pi；
-9. **回答卡片操作**：每条回答下方提供「⧉ 复制」（复制 Markdown 原文到剪贴板，带 ✓ 反馈）与「Raw / 渲染」切换（Markdown 源码视图与渲染视图互切）。
+9. **回答卡片操作**：每条回答下方提供「⧉ 复制」（复制 Markdown 原文到剪贴板，带 ✓ 反馈）与「Raw / 渲染」切换（Markdown 源码视图与渲染视图互切）；
+10. **流式输出**：`/api/chat/stream` 逐段推送——内置 LLM 模式解析 `chat` 与 `responses` 两种 SSE 增量，pi 模式转发 SDK `text_delta` 事件，模拟模式假流式；前端打字机展示原文、工具徽标先行展示，`done` 后整体替换为渲染卡片。
 
 ## 依赖说明
 
@@ -130,4 +132,4 @@ npm run lark -- doc search 上线                 # 关键词搜索
 ## 局限（演示定位）
 
 - 模拟模式的回答是关键词规则匹配，仅证明链路，不等于 AI 效果；接入 LLM Key 后即为真实问答。
-- 单机内存/文件存储，无用户体系；未做流式输出（SSE）与长文档分片，均为后续增强项。
+- 单机内存/文件存储，无用户体系；长文档分片（超大文档仍整篇进入上下文，超限时降级模拟）为后续增强项；流式输出已支持（NDJSON over fetch）。

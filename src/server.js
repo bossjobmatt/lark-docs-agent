@@ -137,6 +137,41 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    // 发送消息（流式：NDJSON 事件行 —— start / tool / delta / done / error）
+    if (req.method === "POST" && url.pathname === "/api/chat/stream") {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      const message = String(body.message || "").trim();
+      if (!message) return send(res, 400, { error: "message 不能为空" });
+
+      const session = store.getOrCreate(body.sessionId);
+      res.writeHead(200, {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      const writeEvent = (evt) => {
+        try {
+          res.write(JSON.stringify(evt) + "\n");
+        } catch {
+          /* 连接已断开，忽略 */
+        }
+      };
+      writeEvent({ type: "start", sessionId: session.id });
+
+      const ac = new AbortController();
+      res.on("close", () => ac.abort()); // 客户端断开时中止上游 LLM 请求
+
+      try {
+        const reply = await agent.handle(message, session, { onEvent: writeEvent, signal: ac.signal });
+        store.persist();
+        writeEvent({ type: "done", sessionId: session.id, reply });
+      } catch (e) {
+        writeEvent({ type: "error", error: e.message });
+      } finally {
+        res.end();
+      }
+      return;
+    }
+
     // 清空会话（同时销毁 pi Agent 会话记忆）
     if (req.method === "POST" && url.pathname === "/api/session/clear") {
       const body = JSON.parse((await readBody(req)) || "{}");

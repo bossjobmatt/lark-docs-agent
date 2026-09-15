@@ -210,9 +210,10 @@ function withTimeout(promise, ms, label) {
 
 /**
  * 运行一轮 pi Agent 对话。
+ * 提供 onEvent 时逐段回调 { type: "tool", toolCalls }（快照）与 { type: "delta", text }（增量）。
  * 返回 { content, html, toolCalls, mode: "pi" }；失败抛错，由上层降级。
  */
-async function run(message, sessionId) {
+async function run(message, sessionId, { onEvent } = {}) {
   const pi = await loadPi();
   if (!pi) throw new Error("pi SDK 未安装（npm i @earendil-works/pi-coding-agent）");
 
@@ -221,7 +222,7 @@ async function run(message, sessionId) {
 
   // 同一会话串行执行，避免 prompt 并发冲突
   const task = entry.busy.then(async () => {
-    const unsubscribe = bindToolEvents(entry, toolCalls);
+    const unsubscribe = bindToolEvents(entry, toolCalls, onEvent);
     try {
       await withTimeout(entry.session.prompt(message), PROMPT_TIMEOUT_MS, "pi 处理超时");
     } catch (e) {
@@ -240,9 +241,10 @@ async function run(message, sessionId) {
   return task;
 }
 
-/** 订阅工具执行事件，映射为前端徽标结构；返回退订函数 */
-function bindToolEvents(entry, toolCalls) {
+/** 订阅工具执行与文本增量事件，映射为前端徽标/流式结构；返回退订函数 */
+function bindToolEvents(entry, toolCalls, onEvent) {
   const pending = new Map(); // toolCallId -> index in toolCalls
+  const emitTools = () => onEvent && onEvent({ type: "tool", toolCalls: [...toolCalls] });
   const unsubscribe = entry.session.subscribe((event) => {
     if (event.type === "tool_execution_start") {
       pending.set(event.toolCallId, toolCalls.length);
@@ -252,14 +254,23 @@ function bindToolEvents(entry, toolCalls) {
         status: "ok",
         summary: "执行中…",
       });
+      emitTools();
     } else if (event.type === "tool_execution_end") {
       const idx = pending.has(event.toolCallId) ? pending.get(event.toolCallId) : toolCalls.length - 1;
       const item = toolCalls[idx];
-      if (!item) return;
-      item.status = event.isError ? "error" : "ok";
-      item.summary =
-        (event.result && event.result.details && event.result.details.summary) ||
-        (event.isError ? "调用失败" : "完成");
+      if (item) {
+        item.status = event.isError ? "error" : "ok";
+        item.summary =
+          (event.result && event.result.details && event.result.details.summary) ||
+          (event.isError ? "调用失败" : "完成");
+      }
+      emitTools();
+    } else if (event.type === "message_update") {
+      // 转发正文增量；跳过 thinking 增量与工具参数增量
+      const ame = event.assistantMessageEvent;
+      if (onEvent && ame && ame.type === "text_delta" && ame.delta) {
+        onEvent({ type: "delta", text: ame.delta });
+      }
     }
   });
   return unsubscribe;

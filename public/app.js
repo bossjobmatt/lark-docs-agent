@@ -31,18 +31,23 @@ function el(tag, cls) {
   return node;
 }
 
+/** 工具调用徽标列表（流式与非流式渲染共用） */
+function toolChipsEl(toolCalls) {
+  const tools = el("div", "toolcalls");
+  for (const t of toolCalls) {
+    const chip = el("span", `tool ${t.status || ""}`);
+    const icon = t.status === "ok" ? "🛠" : t.status === "cache" ? "⚡" : t.status === "error" ? "❌" : "🛠";
+    chip.textContent = `${icon} $ ${t.tool} ${t.args} — ${t.summary}`;
+    tools.appendChild(chip);
+  }
+  return tools;
+}
+
 function renderMessage(m) {
   const wrap = el("div", `msg ${m.role}`);
 
   if (m.toolCalls && m.toolCalls.length) {
-    const tools = el("div", "toolcalls");
-    for (const t of m.toolCalls) {
-      const chip = el("span", `tool ${t.status || ""}`);
-      const icon = t.status === "ok" ? "🛠" : t.status === "cache" ? "⚡" : t.status === "error" ? "❌" : "🛠";
-      chip.textContent = `${icon} $ ${t.tool} ${t.args} — ${t.summary}`;
-      tools.appendChild(chip);
-    }
-    wrap.appendChild(tools);
+    wrap.appendChild(toolChipsEl(m.toolCalls));
   }
 
   const bubble = el("div", "bubble");
@@ -156,11 +161,7 @@ async function handleSend(text) {
   scrollBottom();
 
   try {
-    const data = await post("/api/chat", { sessionId, message: text });
-    sessionId = data.sessionId;
-    localStorage.setItem("lark-docs-session", sessionId);
-    refreshHealth();
-    refresh(data.history);
+    await sendStreaming(text, typing);
   } catch (e) {
     typing.remove();
     chatEl.appendChild(renderMessage({ role: "assistant", content: `❌ 请求失败：${e.message}` }));
@@ -169,6 +170,85 @@ async function handleSend(text) {
     setBusy(false);
     input.focus();
   }
+}
+
+/**
+ * 流式发送：POST /api/chat/stream，按行读 NDJSON 事件。
+ * 流式期间在气泡里累积 Markdown 原文（打字机效果），done 后整体替换为服务端渲染的完整卡片。
+ */
+async function sendStreaming(text, typing) {
+  const resp = await fetch("/api/chat/stream", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sessionId, message: text }),
+  });
+  if (!resp.ok || !(resp.headers.get("content-type") || "").includes("ndjson")) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err.error || `HTTP ${resp.status}`);
+  }
+
+  const wrap = el("div", "msg assistant");
+  const bubble = el("div", "bubble streaming");
+  wrap.appendChild(bubble);
+  chatEl.appendChild(wrap);
+  scrollBottom();
+
+  let toolsEl = null;
+  let finished = false;
+  let errMsg = null;
+  const onEvent = (evt) => {
+    if (evt.type === "start") {
+      sessionId = evt.sessionId;
+      localStorage.setItem("lark-docs-session", sessionId);
+    } else if (evt.type === "tool") {
+      if (typing.parentNode) typing.remove();
+      if (!toolsEl) {
+        toolsEl = el("div", "toolcalls");
+        wrap.insertBefore(toolsEl, bubble);
+      }
+      toolsEl.innerHTML = "";
+      toolsEl.appendChild(toolChipsEl(evt.toolCalls || []));
+      scrollBottom();
+    } else if (evt.type === "delta") {
+      if (typing.parentNode) typing.remove();
+      bubble.textContent += evt.text;
+      scrollBottom();
+    } else if (evt.type === "done") {
+      finished = true;
+      if (typing.parentNode) typing.remove();
+      wrap.replaceWith(renderMessage(evt.reply));
+      refreshHealth();
+      scrollBottom();
+    } else if (evt.type === "error") {
+      if (typing.parentNode) typing.remove();
+      bubble.classList.remove("streaming");
+      bubble.textContent += (bubble.textContent ? "\n\n" : "") + `❌ ${evt.error}`;
+      errMsg = evt.error;
+    }
+  };
+
+  const reader = resp.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, idx).trim();
+      buf = buf.slice(idx + 1);
+      if (!line) continue;
+      let evt;
+      try {
+        evt = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      onEvent(evt);
+    }
+  }
+  if (!finished && !errMsg) throw new Error("流式连接提前结束");
 }
 
 function updateBadge(mode, model, agentMode) {

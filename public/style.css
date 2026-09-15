@@ -330,3 +330,17 @@ button.primary {
   cursor: pointer;
 }
 button.primary:hover { background: #2b5fd9; }
+
+/* 流式输出：气泡内原文累积（打字机），完成后替换为渲染卡片 */
+.bubble.streaming {
+  white-space: pre-wrap;
+  font-family: inherit;
+}
+.bubble.streaming::after {
+  content: "▌";
+  opacity: 0.55;
+  animation: caret 1s steps(2) infinite;
+}
+@keyframes caret {
+  50% { opacity: 0; }
+}

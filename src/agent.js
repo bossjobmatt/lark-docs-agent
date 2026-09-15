@@ -130,8 +130,8 @@ function buildSimReply(question, session) {
   return parts.join("\n");
 }
 
-/** LLM 模式：把 CLI 拉到的文档全文 + 最近对话上下文一起交给模型 */
-async function askLlm(question, session) {
+/** LLM 模式：把 CLI 拉到的文档全文 + 最近对话上下文一起交给模型；提供 onDelta 时走流式 */
+async function askLlm(question, session, { onDelta, signal } = {}) {
   const docBlocks = Object.values(session.docs)
     .map(
       (d) =>
@@ -158,16 +158,32 @@ async function askLlm(question, session) {
     ...(docBlocks ? [{ role: "system", content: `以下是已读取的文档内容：\n\n${docBlocks}` }] : []),
     ...history,
   ];
-  return llm.chat(messages);
+  if (onDelta) return llm.chatStream(messages, { onDelta, signal });
+  return llm.chat(messages, { signal });
+}
+
+/** 模拟模式假流式：把整段回复切成小块回调，保持与其他模式一致的打字体验 */
+async function fakeStream(content, onEvent) {
+  const CHUNK = 64;
+  for (let i = 0; i < content.length; i += CHUNK) {
+    onEvent({ type: "delta", text: content.slice(i, i + CHUNK) });
+    await new Promise((r) => setTimeout(r, 12));
+  }
 }
 
 /**
  * 内置编排模式：服务端预取文档 → LLM/模拟规则回答。
+ * 提供 onEvent 时逐段回调 { type: "tool", toolCalls }（快照）与 { type: "delta", text }（增量）。
  * 返回 { role, content, html, toolCalls, mode, ts }（不写入会话）。
  */
-async function builtinCore(message, session) {
+/**
+ * 内置编排模式：服务端预取文档 → LLM/模拟规则回答。
+ * 返回 { role, content, html, toolCalls, mode, ts }（不写入会话）。
+ */
+async function builtinCore(message, session, { onEvent, signal } = {}) {
   // 1) 工具调用：读取文档（带会话级缓存）
   const toolCalls = [];
+  const emitTools = () => onEvent && onEvent({ type: "tool", toolCalls: [...toolCalls] });
   for (const token of extractTokens(message)) {
     if (session.docs[token]) {
       toolCalls.push({
@@ -176,6 +192,7 @@ async function builtinCore(message, session) {
         status: "cache",
         summary: `命中会话缓存：《${session.docs[token].title}》`,
       });
+      emitTools();
       continue;
     }
     const res = await runLarkCli(["doc", "get", token]);
@@ -190,6 +207,7 @@ async function builtinCore(message, session) {
     } else {
       toolCalls.push({ tool: "lark doc get", args: token, status: "error", summary: `调用失败：${res.msg}` });
     }
+    emitTools();
   }
 
   // 2) 生成回复：LLM 模式，失败/未配置则降级为模拟模式
@@ -197,13 +215,17 @@ async function builtinCore(message, session) {
   let content;
   if (llm.isConfigured()) {
     try {
-      content = await askLlm(message, session);
+      content = await askLlm(message, session, {
+        onDelta: onEvent && ((text) => onEvent({ type: "delta", text })),
+        signal,
+      });
       mode = "llm";
     } catch (e) {
       content = `> ⚠️ LLM 调用失败（${e.message}），已降级为本地模拟回复。\n\n` + buildSimReply(message, session);
     }
   } else {
     content = buildSimReply(message, session);
+    if (onEvent) await fakeStream(content, onEvent);
   }
 
   return {
@@ -221,8 +243,9 @@ async function builtinCore(message, session) {
  * - "pi"：pi Agent 模式，规则写入 system prompt，由模型自主调用 lark CLI（专用工具）；
  *   失败自动降级为内置编排。
  * - "builtin"：服务端预取文档 → LLM/模拟规则回答。
+ * - 提供 onEvent 时逐段回调流式事件（tool 快照 / delta 增量），供 /api/chat/stream 使用。
  */
-async function handle(message, session) {
+async function handle(message, session, { onEvent, signal } = {}) {
   session.messages.push({
     role: "user",
     content: message,
@@ -232,7 +255,7 @@ async function handle(message, session) {
   let reply;
   if (llm.publicConfig().agentMode === "pi") {
     try {
-      const r = await piAgent.run(message, session.id);
+      const r = await piAgent.run(message, session.id, { onEvent });
       reply = {
         role: "assistant",
         content: r.content,
@@ -242,13 +265,13 @@ async function handle(message, session) {
         ts: new Date().toLocaleString("zh-CN", { hour12: false }),
       };
     } catch (e) {
-      reply = await builtinCore(message, session);
+      reply = await builtinCore(message, session, { onEvent, signal });
       const note = `> ⚠️ pi Agent 调用失败（${e.message}），已降级为内置模式。\n\n`;
       reply.content = note + reply.content;
       reply.html = renderMarkdown(reply.content);
     }
   } else {
-    reply = await builtinCore(message, session);
+    reply = await builtinCore(message, session, { onEvent, signal });
   }
 
   session.messages.push(reply);
