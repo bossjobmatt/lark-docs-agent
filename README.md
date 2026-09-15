@@ -88,8 +88,9 @@ npm run lark -- doc search 上线                 # 关键词搜索
 ```
 
 - **agent.js**：从消息中提取飞书/Lark 链接（`feishu.cn` / `larksuite.com` / `larkoffice.com`，或 `doccn` 开头裸 token，单条最多 3 篇）→ 调 CLI → 组装上下文 → LLM 回答或降级模拟回答。
-- **会话缓存**：同一会话内同一文档只调一次 CLI（重复发送链接会显示 ⚡ 缓存命中徽标）。
+- **会话缓存**：同一会话内同一文档只调一次 CLI（重复发送链接会显示 ⚡ 缓存命中徽标）；缓存仅存内存（每会话上限 20 篇），服务重启后同文档会重调 CLI。
 - **多轮持久化**：会话与消息落盘 `data/sessions.json`，服务重启后刷新页面不丢历史。
+- **存储瘦身与淘汰**：落盘为紧凑 JSON，只存 Markdown 原文（html 渲染结果不落盘，加载时按原文现算；docs 文档缓存不落盘）；会话自动淘汰——默认 7 天不活跃（`SESSION_TTL_DAYS`）或总数超过 100 个（`SESSION_MAX_COUNT`）即删，每会话仅保留最近 50 条消息（`SESSION_MAX_MESSAGES`）。
 - **Markdown 渲染**：服务端用 `marked` 转 HTML 并做轻量消毒（去 `<script>`/`<iframe>`/内联事件），前端零依赖。
 
 ## API 一览
