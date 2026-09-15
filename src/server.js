@@ -81,10 +81,12 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && url.pathname === "/api/llm/config") {
       const body = JSON.parse((await readBody(req)) || "{}");
       const cfg = llm.setConfig(body);
+      piAgent.syncConfig(); // pi 模式：凭据变化时立即刷新自有 agentDir
       return send(res, 200, { ok: true, config: cfg, mode: llm.isConfigured() ? "llm" : "sim" });
     }
     if (req.method === "POST" && url.pathname === "/api/llm/config/reset") {
       const cfg = llm.resetConfig();
+      piAgent.syncConfig();
       return send(res, 200, { ok: true, config: cfg, mode: llm.isConfigured() ? "llm" : "sim" });
     }
     // 连接测试：用表单当前值（Key 留空则用已存值）发一条真实请求

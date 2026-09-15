@@ -76,6 +76,8 @@ function resetConfig() {
 }
 
 const isConfigured = () => Boolean(config.apiKey);
+/** 内部用途：读取明文 Key（如 pi 模式生成自有 provider 配置时） */
+const getApiKey = () => config.apiKey;
 
 function extractResponseText(json) {
   // Responses API：优先从 output[].content[].output_text 拼接，兼容聚合字段 output_text
@@ -168,4 +170,4 @@ async function listModels(overrides = {}) {
   }
 }
 
-module.exports = { isConfigured, chat, test, listModels, publicConfig, setConfig, resetConfig };
+module.exports = { isConfigured, getApiKey, chat, test, listModels, publicConfig, setConfig, resetConfig };

@@ -7,13 +7,20 @@
  * - 每个 UI 会话对应一个常驻 AgentSession（多轮记忆），上限 LRU 淘汰
  * - tool_execution_* 事件映射为前端工具徽标（toolCalls）
  */
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
 const { Type } = require("typebox");
+const llm = require("./llm");
 const { runLarkCli } = require("./lark");
 const { renderMarkdown } = require("./markdown");
 
 const TOOL_NAME = "lark_doc_get";
 const PROMPT_TIMEOUT_MS = Number(process.env.PI_PROMPT_TIMEOUT_MS) || 120000;
 const MAX_SESSIONS = 50;
+const PROJECT_ROOT = path.join(__dirname, "..");
+// pi 模式自有配置目录（models.json/settings.json 由应用生成，不依赖本机安装的 pi）
+const OWN_AGENT_DIR = process.env.PI_AGENT_DIR || path.join(PROJECT_ROOT, "data", "pi-agent");
 
 const SYSTEM_PROMPT = [
   "你是部署在本地服务中的 Lark 文档问答助手。",
@@ -85,6 +92,56 @@ function extractText(message) {
 
 const sessions = new Map(); // sessionId -> { session, busy: Promise }
 
+// ---------- 自有 agentDir：凭据来自界面 LLM 配置，使 pi 模式不依赖本机安装的 pi ----------
+
+let configFingerprint = "";
+
+function resolveAgentDir() {
+  // 1) 显式指定（PI_AGENT_DIR）
+  if (process.env.PI_AGENT_DIR) return { dir: process.env.PI_AGENT_DIR, source: "env(PI_AGENT_DIR)" };
+
+  // 2) 界面已配置 LLM 凭据 → 生成/刷新自有目录（主路径，无 pi 安装也可运行）
+  if (llm.isConfigured()) {
+    try {
+      writeOwnConfig(OWN_AGENT_DIR);
+      return { dir: OWN_AGENT_DIR, source: "app(界面配置)" };
+    } catch (e) {
+      console.error("[pi-agent] 自有配置生成失败:", e.message);
+    }
+  }
+
+  // 3) 兜底：本机已配置 pi（~/.pi/agent 有 provider 定义）时借用
+  const piDir = path.join(os.homedir(), ".pi", "agent");
+  if (fs.existsSync(path.join(piDir, "models.json"))) return { dir: piDir, source: "pi(~/.pi/agent)" };
+
+  return null;
+}
+
+/** 把界面 LLM 配置写成 pi 的 models.json/settings.json；配置变化时废弃旧会话池 */
+function writeOwnConfig(dir) {
+  const cfg = llm.publicConfig();
+  const apiKey = llm.getApiKey();
+  const fingerprint = [cfg.baseUrl, cfg.model, cfg.apiType, apiKey].join("|");
+  if (fingerprint === configFingerprint) return;
+
+  for (const id of [...sessions.keys()]) dispose(id); // 模型/网关变了，旧会话作废
+
+  const providerId = "lark-docs";
+  const provider = {
+    name: providerId,
+    api: cfg.apiType === "responses" ? "openai-responses" : "openai-completions",
+    baseUrl: cfg.baseUrl,
+    apiKey,
+    authHeader: true,
+    models: [{ id: cfg.model, name: cfg.model }],
+  };
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "models.json"), JSON.stringify({ providers: { [providerId]: provider } }, null, 2));
+  fs.writeFileSync(path.join(dir, "settings.json"), JSON.stringify({ defaultProvider: providerId, defaultModel: cfg.model }));
+  configFingerprint = fingerprint;
+  console.log(`[pi-agent] 已生成自有 pi 配置: ${dir}（${provider.api} · ${cfg.model}）`);
+}
+
 function evictIfNeeded() {
   while (sessions.size >= MAX_SESSIONS) {
     const oldest = sessions.keys().next().value;
@@ -110,9 +167,15 @@ async function getOrCreateSession(pi, sessionId) {
 
   if (!defineTool) defineTool = pi.defineTool;
 
+  const resolved = resolveAgentDir();
+  if (!resolved) {
+    throw new Error("pi 模式缺少 LLM 凭据：请在「配置 LLM」中填写 API Key（或本机已配置 pi 的 ~/.pi/agent）");
+  }
+  console.log(`[pi-agent] 新建会话，agentDir=${resolved.dir}（来源: ${resolved.source}）`);
+
   const loader = new pi.DefaultResourceLoader({
     cwd: process.cwd(),
-    agentDir: pi.getAgentDir(),
+    agentDir: resolved.dir,
     noExtensions: true,
     noSkills: true,
     noPromptTemplates: true,
@@ -124,6 +187,7 @@ async function getOrCreateSession(pi, sessionId) {
 
   const { session } = await pi.createAgentSession({
     cwd: process.cwd(),
+    agentDir: resolved.dir, // 凭据/模型运行时同样使用自有目录
     sessionManager: pi.SessionManager.inMemory(),
     tools: [TOOL_NAME], // 只允许专用工具，不暴露 read/bash/edit/write
     customTools: [makeLarkTool()],
@@ -210,4 +274,14 @@ function extractReply(session, toolCalls) {
   return { content, html: renderMarkdown(content), toolCalls, mode: "pi" };
 }
 
-module.exports = { run, dispose, isAvailable };
+/** 界面配置变化后立即同步自有 agentDir（供 /api/llm/config 保存时调用） */
+function syncConfig() {
+  if (!llm.isConfigured()) return;
+  try {
+    writeOwnConfig(OWN_AGENT_DIR);
+  } catch (e) {
+    console.error("[pi-agent] 自有配置同步失败:", e.message);
+  }
+}
+
+module.exports = { run, dispose, isAvailable, syncConfig };

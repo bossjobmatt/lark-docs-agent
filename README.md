@@ -10,13 +10,17 @@
 | 模式 | 工作方式 | LLM 来源 |
 | --- | --- | --- |
 | **内置编排**（默认） | 服务端提取文档链接 → 预取文档 → 组装上下文 → LLM/模拟规则回答 | 界面配置的 OpenAI 兼容 API（chat / responses） |
-| **pi Agent** | lark CLI 使用规则写入 system prompt，由 [pi](https://pi.dev)（`@earendil-works/pi-coding-agent` SDK）驱动的模型**自主调用**专用工具 `lark_doc_get`（内部执行本地 lark CLI）读取文档后回答；不暴露 bash 等任意命令 | 本机 pi CLI 已配置的 provider（`pi --list-models` 可查看） |
+| **pi Agent** | lark CLI 使用规则写入 system prompt，由 [pi](https://pi.dev) SDK（`@earendil-works/pi-coding-agent`，**项目内依赖**）驱动的模型**自主调用**专用工具 `lark_doc_get`（内部执行本地 lark CLI）读取文档后回答；不暴露 bash 等任意命令 | 与内置模式**同一套界面凭据**：保存配置时自动写入自有目录 `data/pi-agent/`（models.json/settings.json） |
+
+**pi Agent 模式不依赖本地安装的 pi CLI**：SDK 来自项目 `node_modules`，凭据/模型目录由应用自己生成（`data/pi-agent/`，可用 `PI_AGENT_DIR` 覆盖）。已在「假 HOME + 无 `~/.pi` + 离线」环境下实测跑通。仅当界面未配置 Key 且本机装有已配置的 pi 时，才回退借用 `~/.pi/agent`（向后兼容）。
 
 pi Agent 模式要点：
 
 - 每个 UI 会话对应一个常驻 `AgentSession`（多轮记忆，追问无需重复发链接）；「清空会话」会同步销毁
 - 工具调用过程通过 SDK 事件回传，前端展示 `$ lark_doc_get …` 徽标
-- pi SDK 未安装、provider 不可用或处理超时（默认 120s，`PI_PROMPT_TIMEOUT_MS` 可调）时，**自动降级**为内置编排模式并在回复中提示
+- 界面凭据变化时自动刷新自有配置并废弃旧会话池；保存配置即时生效
+- pi SDK 未安装、凭据缺失或处理超时（默认 120s，`PI_PROMPT_TIMEOUT_MS` 可调）时，**自动降级**为内置编排模式并在回复中提示
+- 注意：`data/pi-agent/models.json` 与 `data/llm-config.json` 含明文 API Key，两者均已被 gitignore
 
 ## 结论（可行性评估）
 
@@ -112,12 +116,13 @@ npm run lark -- doc search 上线                 # 关键词搜索
 4. 刷新页面 → 历史消息（含渲染后的 Markdown）完整恢复；
 5. 界面点击配置 LLM（chat 与 responses 两种类型，经本地 mock OpenAI 服务验证）→ 测试连接、保存生效、徽标联动、Agent 将文档上下文与多轮历史一并交给 LLM、「恢复默认」回模拟模式；
 6. 模型字段：点「拉取列表」经 `GET /models` 取回后以下拉列表选择，或切换「手动输入」自由填写，双模式值同步；
-7. **pi Agent 模式**：system prompt 规则驱动，模型自主调用 `lark_doc_get` 读取文档并回答；同会话追问无需重复发链接（会话记忆）；SDK 缺失时自动降级为内置编排并在回复中提示。
+7. **pi Agent 模式**：system prompt 规则驱动，模型自主调用 `lark_doc_get` 读取文档并回答；同会话追问无需重复发链接（会话记忆）；SDK 缺失时自动降级为内置编排并在回复中提示；
+8. **无 pi 安装环境**：以假 HOME（无 `~/.pi`）+ 离线模式启动服务，仅凭界面配置的凭据跑通 pi 模式全流程（首问调工具、追问靠会话记忆、UI 徽标正常），证明 pi 模式零依赖本地安装的 pi。
 
 ## 依赖说明
 
 - `marked`：服务端 Markdown → HTML 渲染
-- `@earendil-works/pi-coding-agent` + `typebox`：pi Agent 模式的 SDK 与工具参数 schema（仅该模式使用；未安装时内置编排不受影响）
+- `@earendil-works/pi-coding-agent` + `typebox`：pi Agent 模式的 SDK 与工具参数 schema（项目内依赖，随 `npm install` 安装，无需全局安装 pi CLI；未安装时内置编排不受影响）
 
 ## 局限（演示定位）
 
