@@ -1,5 +1,6 @@
 const { runLarkCli } = require("./lark");
 const llm = require("./llm");
+const piAgent = require("./pi-agent");
 const { renderMarkdown } = require("./markdown");
 
 // 从用户消息中提取飞书/Lark 文档标识：完整链接，或 doccn 开头的裸 token
@@ -161,16 +162,10 @@ async function askLlm(question, session) {
 }
 
 /**
- * Agent 主流程：记录用户消息 → 提取文档标识 → 调（或命中缓存的）lark CLI → 生成回复。
- * 返回 { content, html, toolCalls, mode }。
+ * 内置编排模式：服务端预取文档 → LLM/模拟规则回答。
+ * 返回 { role, content, html, toolCalls, mode, ts }（不写入会话）。
  */
-async function handle(message, session) {
-  session.messages.push({
-    role: "user",
-    content: message,
-    ts: new Date().toLocaleString("zh-CN", { hour12: false }),
-  });
-
+async function builtinCore(message, session) {
   // 1) 工具调用：读取文档（带会话级缓存）
   const toolCalls = [];
   for (const token of extractTokens(message)) {
@@ -211,7 +206,7 @@ async function handle(message, session) {
     content = buildSimReply(message, session);
   }
 
-  const reply = {
+  return {
     role: "assistant",
     content,
     html: renderMarkdown(content),
@@ -219,6 +214,43 @@ async function handle(message, session) {
     mode,
     ts: new Date().toLocaleString("zh-CN", { hour12: false }),
   };
+}
+
+/**
+ * Agent 主流程：记录用户消息 → 按配置的 agentMode 生成回复。
+ * - "pi"：pi Agent 模式，规则写入 system prompt，由模型自主调用 lark CLI（专用工具）；
+ *   失败自动降级为内置编排。
+ * - "builtin"：服务端预取文档 → LLM/模拟规则回答。
+ */
+async function handle(message, session) {
+  session.messages.push({
+    role: "user",
+    content: message,
+    ts: new Date().toLocaleString("zh-CN", { hour12: false }),
+  });
+
+  let reply;
+  if (llm.publicConfig().agentMode === "pi") {
+    try {
+      const r = await piAgent.run(message, session.id);
+      reply = {
+        role: "assistant",
+        content: r.content,
+        html: r.html,
+        toolCalls: r.toolCalls,
+        mode: "pi",
+        ts: new Date().toLocaleString("zh-CN", { hour12: false }),
+      };
+    } catch (e) {
+      reply = await builtinCore(message, session);
+      const note = `> ⚠️ pi Agent 调用失败（${e.message}），已降级为内置模式。\n\n`;
+      reply.content = note + reply.content;
+      reply.html = renderMarkdown(reply.content);
+    }
+  } else {
+    reply = await builtinCore(message, session);
+  }
+
   session.messages.push(reply);
   return reply;
 }

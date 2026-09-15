@@ -5,6 +5,19 @@
 > 本仓库内置一个**模拟版 lark CLI**（`bin/lark`），无需真实安装与鉴权即可跑通全链路；
 > 通过 `LARK_CLI` 环境变量可无缝替换为真实 CLI。
 
+支持两种 **Agent 模式**（界面「⚙️ 配置 LLM」中切换，保存即生效）：
+
+| 模式 | 工作方式 | LLM 来源 |
+| --- | --- | --- |
+| **内置编排**（默认） | 服务端提取文档链接 → 预取文档 → 组装上下文 → LLM/模拟规则回答 | 界面配置的 OpenAI 兼容 API（chat / responses） |
+| **pi Agent** | lark CLI 使用规则写入 system prompt，由 [pi](https://pi.dev)（`@earendil-works/pi-coding-agent` SDK）驱动的模型**自主调用**专用工具 `lark_doc_get`（内部执行本地 lark CLI）读取文档后回答；不暴露 bash 等任意命令 | 本机 pi CLI 已配置的 provider（`pi --list-models` 可查看） |
+
+pi Agent 模式要点：
+
+- 每个 UI 会话对应一个常驻 `AgentSession`（多轮记忆，追问无需重复发链接）；「清空会话」会同步销毁
+- 工具调用过程通过 SDK 事件回传，前端展示 `$ lark_doc_get …` 徽标
+- pi SDK 未安装、provider 不可用或处理超时（默认 120s，`PI_PROMPT_TIMEOUT_MS` 可调）时，**自动降级**为内置编排模式并在回复中提示
+
 ## 结论（可行性评估）
 
 **需求可行，且架构不复杂。** 已用模拟 CLI 验证全链路。将模拟 CLI 换成真实实现时，主要工作量与风险点如下：
@@ -35,10 +48,11 @@ npm start          # 启动后访问 http://127.0.0.1:3737
 
 | 字段 | 说明 |
 | --- | --- |
-| 接口类型 | `chat`（Chat Completions，`/chat/completions`）或 `responses`（Responses，`/responses`） |
-| Base URL | 任意 OpenAI 兼容网关，默认 `https://api.openai.com/v1` |
-| API Key | 保存后打码显示（`sk-****xxxx`），留空表示保持不变 |
-| 模型 | 支持两种方式：点击 **「↻ 拉取列表」** 从网关拉取（`GET /models`）后用 **select 下拉选择**；或点击 **「✏️ 手动输入」** 自由填写任意模型名（两种模式值互相同步） |
+| Agent 模式 | `builtin`（内置编排）或 `pi`（pi Agent，模型自主调用 lark CLI） |
+| 接口类型 | `chat`（Chat Completions，`/chat/completions`）或 `responses`（Responses，`/responses`）——仅内置模式使用 |
+| Base URL | 任意 OpenAI 兼容网关，默认 `https://api.openai.com/v1`——仅内置模式使用 |
+| API Key | 保存后打码显示（`sk-****xxxx`），留空表示保持不变——仅内置模式使用 |
+| 模型 | 支持两种方式：点击 **「↻ 拉取列表」** 从网关拉取（`GET /models`）后用 **select 下拉选择**；或点击 **「✏️ 手动输入」** 自由填写任意模型名（两种模式值互相同步）——仅内置模式使用 |
 
 支持 **「测试连接」**（用表单当前值发一条真实请求）与 **「恢复默认」**（清除配置回到模拟模式）。配置持久化在 `data/llm-config.json`（已 gitignore），无需重启服务、无需环境变量；环境变量 `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` / `LLM_API_TYPE` 仅作为未配置时的默认值。
 
@@ -97,7 +111,13 @@ npm run lark -- doc search 上线                 # 关键词搜索
 3. 无效文档链接 → 错误徽标提示「document not found or no permission」，对话不中断；
 4. 刷新页面 → 历史消息（含渲染后的 Markdown）完整恢复；
 5. 界面点击配置 LLM（chat 与 responses 两种类型，经本地 mock OpenAI 服务验证）→ 测试连接、保存生效、徽标联动、Agent 将文档上下文与多轮历史一并交给 LLM、「恢复默认」回模拟模式；
-6. 模型字段：点「拉取列表」经 `GET /models` 取回后以下拉列表选择，或切换「手动输入」自由填写，双模式值同步。
+6. 模型字段：点「拉取列表」经 `GET /models` 取回后以下拉列表选择，或切换「手动输入」自由填写，双模式值同步；
+7. **pi Agent 模式**：system prompt 规则驱动，模型自主调用 `lark_doc_get` 读取文档并回答；同会话追问无需重复发链接（会话记忆）；SDK 缺失时自动降级为内置编排并在回复中提示。
+
+## 依赖说明
+
+- `marked`：服务端 Markdown → HTML 渲染
+- `@earendil-works/pi-coding-agent` + `typebox`：pi Agent 模式的 SDK 与工具参数 schema（仅该模式使用；未安装时内置编排不受影响）
 
 ## 局限（演示定位）
 

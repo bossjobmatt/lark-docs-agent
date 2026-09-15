@@ -12,6 +12,8 @@
     "lark": "node bin/lark"
   },
   "dependencies": {
-    "marked": "^12.0.0"
+    "@earendil-works/pi-coding-agent": "^0.85.1",
+    "marked": "^12.0.0",
+    "typebox": "^1.3.7"
   }
 }

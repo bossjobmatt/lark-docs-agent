@@ -16,6 +16,7 @@ const llmMsg = document.getElementById("llm-msg");
 const llmFetchBtn = document.getElementById("llm-fetch-models");
 const llmModelSelect = document.getElementById("llm-model-select");
 const llmManualBtn = document.getElementById("llm-manual-model");
+const llmAgentMode = document.getElementById("llm-agent-mode");
 
 let sessionId = localStorage.getItem("lark-docs-session") || null;
 let busy = false;
@@ -128,7 +129,12 @@ async function handleSend(text) {
   }
 }
 
-function updateBadge(mode, model) {
+function updateBadge(mode, model, agentMode) {
+  if (agentMode === "pi") {
+    badgeEl.className = "badge";
+    badgeEl.textContent = "pi Agent 模式";
+    return;
+  }
   if (mode === "llm") {
     badgeEl.className = "badge";
     badgeEl.textContent = `LLM 模式${model ? ` · ${model}` : ""}`;
@@ -141,7 +147,11 @@ function updateBadge(mode, model) {
 async function refreshHealth() {
   try {
     const health = await fetch("/api/health").then((r) => r.json());
-    updateBadge(health.mode, health.model);
+    updateBadge(health.mode, health.model, health.agentMode);
+    if (health.agentMode === "pi" && health.piAvailable === false) {
+      badgeEl.textContent = "pi Agent 模式（SDK 未安装，将降级）";
+      badgeEl.className = "badge sim";
+    }
   } catch {
     badgeEl.textContent = "服务未连接";
   }
@@ -156,6 +166,7 @@ function setLlmMsg(text, cls) {
 async function openLlmModal() {
   try {
     const c = await fetch("/api/llm/config").then((r) => r.json());
+    llmAgentMode.value = c.agentMode || "builtin";
     llmType.value = c.apiType || "chat";
     llmBase.value = c.baseUrl || "";
     llmModel.value = c.model || "";
@@ -174,7 +185,7 @@ function closeLlmModal() {
 }
 
 function llmFormPayload() {
-  const payload = { apiType: llmType.value, baseUrl: llmBase.value.trim(), model: llmModel.value.trim() };
+  const payload = { agentMode: llmAgentMode.value, apiType: llmType.value, baseUrl: llmBase.value.trim(), model: llmModel.value.trim() };
   const key = llmKey.value.trim();
   if (key) payload.apiKey = key; // 留空 = 保持已存 Key
   return payload;

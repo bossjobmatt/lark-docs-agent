@@ -17,6 +17,7 @@ const DEFAULTS = {
   baseUrl: process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
   apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "",
   model: process.env.LLM_MODEL || "gpt-4o-mini",
+  agentMode: process.env.AGENT_MODE === "pi" ? "pi" : "builtin", // "builtin" | "pi"
 };
 
 function loadFile() {
@@ -46,8 +47,8 @@ function maskKey(key) {
 
 /** 对外安全的配置视图（不返回明文 Key） */
 function publicConfig() {
-  const { apiType, baseUrl, model, apiKey } = config;
-  return { apiType, baseUrl, model, hasKey: Boolean(apiKey), keyMasked: maskKey(apiKey) };
+  const { apiType, baseUrl, model, apiKey, agentMode } = config;
+  return { apiType, baseUrl, model, hasKey: Boolean(apiKey), keyMasked: maskKey(apiKey), agentMode };
 }
 
 /** 保存配置；apiKey 为空字符串表示保持原值不变 */
@@ -57,6 +58,7 @@ function setConfig(patch = {}) {
   if (typeof patch.baseUrl === "string" && patch.baseUrl.trim()) next.baseUrl = patch.baseUrl.trim().replace(/\/+$/, "");
   if (typeof patch.model === "string" && patch.model.trim()) next.model = patch.model.trim();
   if (typeof patch.apiKey === "string" && patch.apiKey.trim()) next.apiKey = patch.apiKey.trim();
+  if (patch.agentMode === "pi" || patch.agentMode === "builtin") next.agentMode = patch.agentMode;
   config = next;
   persist();
   return publicConfig();

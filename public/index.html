@@ -33,7 +33,15 @@
 
   <div id="llm-modal" class="modal hidden">
     <div class="modal-card">
-      <div class="modal-title">LLM 配置 <span class="modal-sub">OpenAI 兼容 · Chat / Responses</span></div>
+      <div class="modal-title">AI 引擎配置 <span class="modal-sub">OpenAI 兼容 · Chat / Responses · pi Agent</span></div>
+      <label class="field">
+        <span>Agent 模式</span>
+        <select id="llm-agent-mode">
+          <option value="builtin">内置编排（服务端预取文档 → LLM/模拟回答）</option>
+          <option value="pi">pi Agent（system prompt 规则，模型自主调用 lark CLI）</option>
+        </select>
+        <span class="field-hint">pi 模式使用本机 pi CLI 的 provider 作为 LLM；下方接口类型 / Key / 模型仅内置模式使用。</span>
+      </label>
       <label class="field">
         <span>接口类型</span>
         <select id="llm-type">

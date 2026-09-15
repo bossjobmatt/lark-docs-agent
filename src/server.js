@@ -4,6 +4,7 @@ const path = require("path");
 const store = require("./store");
 const agent = require("./agent");
 const llm = require("./llm");
+const piAgent = require("./pi-agent");
 const { runLarkCli } = require("./lark");
 
 const PORT = Number(process.env.PORT) || 3737;
@@ -67,6 +68,8 @@ const server = http.createServer(async (req, res) => {
         mode: configured ? "llm" : "sim",
         model: configured ? cfg.model : null,
         apiType: cfg.apiType,
+        agentMode: cfg.agentMode,
+        piAvailable: cfg.agentMode === "pi" ? await piAgent.isAvailable() : null,
         time: new Date().toISOString(),
       });
     }
@@ -132,10 +135,11 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    // 清空会话
+    // 清空会话（同时销毁 pi Agent 会话记忆）
     if (req.method === "POST" && url.pathname === "/api/session/clear") {
       const body = JSON.parse((await readBody(req)) || "{}");
       store.clear(body.sessionId);
+      piAgent.dispose(body.sessionId);
       return send(res, 200, { ok: true });
     }
 
@@ -148,6 +152,11 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   const cfg = llm.publicConfig();
   console.log(`Lark 文档助手已启动: http://${HOST}:${PORT}`);
-  console.log(`模式: ${llm.isConfigured() ? `LLM（${cfg.apiType} · ${cfg.model}）` : "模拟模式（可在界面右上角「配置 LLM」中启用）"}`);
+  console.log(
+    `Agent 模式: ${cfg.agentMode === "pi" ? "pi Agent（模型自主调用 lark CLI）" : "内置编排（服务端预取文档）"}`
+  );
+  console.log(
+    `LLM: ${llm.isConfigured() ? `${cfg.apiType} · ${cfg.model}` : "未配置（内置模式将以模拟回复运行）"}`
+  );
   console.log(`Lark CLI: ${process.env.LARK_CLI || "bin/lark（模拟实现）"}`);
 });
