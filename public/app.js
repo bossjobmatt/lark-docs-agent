@@ -51,7 +51,49 @@ function renderMessage(m) {
   } else {
     bubble.textContent = m.content;
   }
-  wrap.appendChild(bubble);
+
+  if (m.role === "assistant" && m.content) {
+    // 回答卡片：气泡 + 底部操作条（复制 Markdown 原文 / Raw 与渲染切换）
+    const holder = el("div", "bubble-block");
+    holder.appendChild(bubble);
+
+    const actions = el("div", "bubble-actions");
+
+    const copyBtn = el("button", "mini-action");
+    copyBtn.type = "button";
+    copyBtn.title = "复制 Markdown 原文";
+    copyBtn.textContent = "⧉ 复制";
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(m.content);
+        copyBtn.textContent = "✓ 已复制";
+      } catch {
+        copyBtn.textContent = "复制失败";
+      }
+      setTimeout(() => (copyBtn.textContent = "⧉ 复制"), 1500);
+    });
+    actions.appendChild(copyBtn);
+
+    const rawBtn = el("button", "mini-action");
+    rawBtn.type = "button";
+    rawBtn.title = "在 Markdown 源码与渲染视图间切换";
+    rawBtn.textContent = "Raw";
+    let showRaw = false;
+    rawBtn.addEventListener("click", () => {
+      showRaw = !showRaw;
+      bubble.innerHTML = showRaw
+        ? `<pre class="raw-md">${escapeHtml(m.content)}</pre>`
+        : m.html || escapeHtml(m.content);
+      rawBtn.textContent = showRaw ? "渲染" : "Raw";
+      rawBtn.classList.toggle("active", showRaw);
+    });
+    actions.appendChild(rawBtn);
+
+    holder.appendChild(actions);
+    wrap.appendChild(holder);
+  } else {
+    wrap.appendChild(bubble);
+  }
 
   if (m.ts) {
     const ts = el("span", "ts");
