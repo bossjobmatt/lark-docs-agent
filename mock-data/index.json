@@ -1,0 +1,28 @@
+{
+  "docs": [
+    {
+      "token": "doccnABC123xyz",
+      "file": "prod-spec.md",
+      "title": "产品需求文档：智能周报生成器",
+      "url": "https://demo.feishu.cn/docx/doccnABC123xyz",
+      "owner": "李明",
+      "update_time": "2026-09-10 18:23"
+    },
+    {
+      "token": "doccnAPI456uvw",
+      "file": "api-design.md",
+      "title": "API 接口设计规范 v1.3",
+      "url": "https://demo.feishu.cn/docx/doccnAPI456uvw",
+      "owner": "王强",
+      "update_time": "2026-08-30 11:05"
+    },
+    {
+      "token": "doccnFAQ789rst",
+      "file": "team-faq.md",
+      "title": "团队 FAQ 与上线流程",
+      "url": "https://demo.feishu.cn/docx/doccnFAQ789rst",
+      "owner": "赵敏",
+      "update_time": "2026-09-01 09:40"
+    }
+  ]
+}

@@ -1,0 +1,120 @@
+#!/usr/bin/env node
+/**
+ * 模拟版 Lark CLI（mock）。
+ *
+ * 真实项目中可替换为基于飞书开放平台 OpenAPI 实现的 CLI，只要保持输出约定：
+ *   stdout 输出 JSON 信封 { code, msg, data }，code === 0 表示成功，进程退出码与之对应。
+ *
+ * 支持的命令：
+ *   lark auth status              查看认证状态
+ *   lark doc list                 列出可访问文档
+ *   lark doc get <url|token>      获取文档（标题 + Markdown 正文）
+ *   lark doc search <keyword>     按关键词搜索文档
+ */
+const fs = require("fs");
+const path = require("path");
+
+const DATA_DIR = path.join(__dirname, "..", "mock-data");
+const INDEX = JSON.parse(fs.readFileSync(path.join(DATA_DIR, "index.json"), "utf8"));
+
+// 与真实 Lark 链接形态保持一致：https://xxx.feishu.cn/docx/<token>
+const URL_RE = /[a-zA-Z0-9-]+\.(?:feishu\.cn|larksuite\.com|larkoffice\.com)\/(?:docx|docs|wiki)\/([A-Za-z0-9]+)/;
+
+function tokenFromInput(input) {
+  const m = String(input).match(URL_RE);
+  if (m) return m[1];
+  const bare = String(input).trim();
+  return /^[A-Za-z0-9]{6,}$/.test(bare) ? bare : null;
+}
+
+function loadDoc(token) {
+  const meta = INDEX.docs.find((d) => d.token === token || (d.aliases || []).includes(token));
+  if (!meta) return null;
+  const content = fs.readFileSync(path.join(DATA_DIR, "docs", meta.file), "utf8");
+  return {
+    token: meta.token,
+    title: meta.title,
+    url: meta.url,
+    owner: meta.owner,
+    update_time: meta.update_time,
+    word_count: content.replace(/\s/g, "").length,
+    content,
+  };
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function out(envelope) {
+  process.stdout.write(JSON.stringify(envelope, null, 2) + "\n");
+  process.exit(envelope.code === 0 ? 0 : 1);
+}
+
+async function main() {
+  const args = process.argv.slice(2);
+  const [cmd, sub, ...rest] = args;
+  await sleep(150 + Math.floor(Math.random() * 250)); // 模拟网络往返延迟
+
+  if (!cmd || cmd === "--help" || cmd === "-h") {
+    return out({
+      code: 0,
+      msg: "success",
+      data: {
+        usage: "lark <command> <subcommand> [args]",
+        commands: ["auth status", "doc list", "doc get <url|token>", "doc search <keyword>"],
+        note: "本 CLI 为模拟实现，文档数据来自 mock-data/ 目录",
+      },
+    });
+  }
+
+  if (cmd === "auth" && sub === "status") {
+    return out({
+      code: 0,
+      msg: "success",
+      data: {
+        status: "ok",
+        tenant: "模拟租户（demo）",
+        app_id: "cli_mock_demo",
+        account: "demo@larksuite.com",
+        token_expires_in: 3500,
+      },
+    });
+  }
+
+  if (cmd === "doc" && (sub === "list" || sub === "ls")) {
+    return out({
+      code: 0,
+      msg: "success",
+      data: {
+        total: INDEX.docs.length,
+        items: INDEX.docs.map(({ file, ...d }) => d),
+      },
+    });
+  }
+
+  if (cmd === "doc" && (sub === "get" || sub === "read")) {
+    const token = tokenFromInput(rest[0] || "");
+    if (!token) return out({ code: 99991672, msg: "invalid argument: 缺少文档链接或 token" });
+    const doc = loadDoc(token);
+    if (!doc) return out({ code: 230002, msg: `document not found or no permission: ${token}` });
+    return out({ code: 0, msg: "success", data: doc });
+  }
+
+  if (cmd === "doc" && sub === "search") {
+    const kw = (rest[0] || "").toLowerCase();
+    const items = INDEX.docs
+      .map((d) => loadDoc(d.token))
+      .filter((d) => d.title.toLowerCase().includes(kw) || d.content.toLowerCase().includes(kw))
+      .map(({ content, ...d }) => ({
+        ...d,
+        snippet: (content.split("\n").find((l) => l.toLowerCase().includes(kw)) || "").trim().slice(0, 120),
+      }));
+    return out({ code: 0, msg: "success", data: { total: items.length, items } });
+  }
+
+  out({
+    code: 99991661,
+    msg: `unknown command: ${[cmd, sub].filter(Boolean).join(" ")}（可用: auth status / doc list / doc get <url|token> / doc search <kw>）`,
+  });
+}
+
+main().catch((e) => out({ code: 50001, msg: e.message }));
