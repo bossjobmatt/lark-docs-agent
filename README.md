@@ -2,8 +2,9 @@
 
 本地启动一个 Web 服务：用户在输入框中粘贴 **飞书/Lark 文档链接 + 问题**，AI Agent 调用**本地 Lark CLI** 读取文档后回答，支持**流式输出**、**多轮对话**与 **Markdown 渲染**。
 
-> 本仓库内置一个**模拟版 lark CLI**（`bin/lark`），无需真实安装与鉴权即可跑通全链路；
-> 通过 `LARK_CLI` 环境变量可无缝替换为真实 CLI。
+> 本项目是 lark CLI 的**纯调用方**：优先使用 `LARK_CLI` 环境变量指定的 CLI，否则探测 PATH 中已认证的 `lark`（`lark auth status` 返回成功即视为可用）；
+> 两者都未检测到时不回落任何内置实现——文档相关调用会返回友好提示，引导用户自行安装并认证。本项目不负责 lark CLI 的安装与凭据配置。
+> 仓库内置 `bin/lark` **模拟版 CLI**（配合 `mock-data/` 三篇文档）仅供演示与测试，需显式启用：`LARK_CLI=./bin/lark npm start`。
 
 支持两种 **Agent 模式**（界面「⚙️ 配置 LLM」中切换，保存即生效）：
 
@@ -24,7 +25,7 @@ pi Agent 模式要点：
 
 ## 结论（可行性评估）
 
-**需求可行，且架构不复杂。** 已用模拟 CLI 验证全链路。将模拟 CLI 换成真实实现时，主要工作量与风险点如下：
+**需求可行，且架构不复杂。** 已用模拟 CLI 验证全链路。对接外部已认证 lark CLI 的约定：stdout 输出 JSON 信封 `{ code, msg, data }`（`code === 0` 成功，进程退出码对应），子命令为 `auth status` / `doc list` / `doc get <url|token>` / `doc search <keyword>`。若需自行实现真实 CLI，主要工作量与风险点如下：
 
 | 环节 | 现状（模拟） | 换真实 Lark CLI 的要点 |
 | --- | --- | --- |
@@ -46,7 +47,8 @@ npm run dev        # 开发模式（node --watch，改动自动重启）
 npm test           # 运行测试套件（node --test，含 HTTP e2e 与 mock 网关 fixture）
 ```
 
-- 默认运行在**模拟模式**（无 LLM Key，回复由本地规则生成，演示链路用）。
+- 首次启动（未检测到 lark CLI、未配置 LLM Key）：徽标与欢迎页会提示「未检测到 lark CLI」，示例文档列表为空；带文档链接提问时，回答中会说明需要本地安装并认证 lark CLI。聊天与流式输出不受影响。
+- 演示模式（无真实 CLI 体验全链路）：`LARK_CLI=./bin/lark npm start`，使用内置模拟 CLI 与 `mock-data/` 文档。
 - 默认绑定 `127.0.0.1:3737`，可用 `HOST` / `PORT` 环境变量覆盖（如 `PORT=8080 npm start`）。
 
 ### 点击配置 LLM（界面内，保存即生效）
@@ -65,9 +67,10 @@ npm test           # 运行测试套件（node --test，含 HTTP e2e 与 mock �
 
 支持 **「测试连接」**（用表单当前值发一条真实请求）与 **「恢复默认」**（清除配置回到模拟模式）。配置持久化在 `data/llm-config.json`（已 gitignore），无需重启服务、无需环境变量；环境变量仅作为未配置时的默认值：`LLM_API_KEY`（别名 `OPENAI_API_KEY`）、`LLM_BASE_URL`（别名 `OPENAI_BASE_URL`）、`LLM_MODEL`、`LLM_API_TYPE`、`AGENT_MODE`（`builtin` / `pi`，默认 `pi`）。
 
-## 模拟 CLI 用法
+## 演示用模拟 CLI（内置，需显式启用）
 
 ```bash
+LARK_CLI=./bin/lark npm start   # 服务以内置模拟 CLI 运行
 npm run lark -- auth status                     # 认证状态
 npm run lark -- doc list                        # 列出可访问文档
 npm run lark -- doc get https://demo.feishu.cn/docx/doccnABC123xyz
@@ -75,7 +78,7 @@ npm run lark -- doc get doccnFAQ789rst          # 裸 token 也可以
 npm run lark -- doc search 上线                 # 关键词搜索
 ```
 
-输出为统一 JSON 信封 `{ code, msg, data }`（`code === 0` 成功，与飞书 OpenAPI 风格一致，非 0 时进程退出码为 1）。模拟文档共 3 篇，位于 `mock-data/docs/`。
+输出为统一 JSON 信封 `{ code, msg, data }`（`code === 0` 成功，与飞书 OpenAPI 风格一致，非 0 时进程退出码为 1）。模拟文档共 3 篇，位于 `mock-data/docs/`。支持失败注入：`LARK_FAIL_RATE=0.5`（doc get 50% 概率失败）用于演示降级链路。
 
 ## 架构
 
@@ -118,7 +121,7 @@ npm run lark -- doc search 上线                 # 关键词搜索
 | POST | `/api/llm/test` | 用传入（或已存）配置发真实请求，测试连通性 |
 | POST | `/api/llm/models` | 拉取 OpenAI 兼容模型列表（`GET {baseUrl}/models`） |
 
-替换为真实 Lark CLI（可选）：`LARK_CLI=/path/to/real-lark npm start`。模拟 CLI 支持失败注入：`LARK_FAIL_RATE=0.5`（doc get 50% 概率失败）用于演示降级链路。
+替换为真实 Lark CLI（可选）：`LARK_CLI=/path/to/real-lark npm start`，或确保 PATH 中的 `lark` 已认证（服务启动时自动探测）。模拟 CLI 支持失败注入：`LARK_FAIL_RATE=0.5`（doc get 50% 概率失败）用于演示降级链路。
 
 ## 已验证的端到端场景
 
@@ -132,7 +135,8 @@ npm run lark -- doc search 上线                 # 关键词搜索
 8. **无 pi 安装环境**：以假 HOME（无 `~/.pi`）+ 离线模式启动服务，仅凭界面配置的凭据跑通 pi 模式全流程（首问调工具、追问靠会话记忆、UI 徽标正常），证明 pi 模式零依赖本地安装的 pi；
 9. **回答卡片操作**：每条回答下方提供「⧉ 复制」（复制 Markdown 原文到剪贴板，带 ✓ 反馈）与「Raw / 渲染」切换（Markdown 源码视图与渲染视图互切）；
 10. **流式输出**：`/api/chat/stream` 逐段推送——内置 LLM 模式解析 `chat` 与 `responses` 两种 SSE 增量，pi 模式转发 SDK `text_delta` 事件，模拟模式假流式；前端打字机展示原文、工具徽标先行展示，`done` 后整体替换为渲染卡片；
-11. **会话管理**：「🗂 会话」面板切换/新建/删除历史会话，切换即恢复该会话完整历史（含渲染 Markdown）。
+11. **会话管理**：「🗂 会话」面板切换/新建/删除历史会话，切换即恢复该会话完整历史（含渲染 Markdown）；
+12. **无 lark CLI 环境**：未检测到已认证 CLI 时，health 报告 `lark.available=false`，徽标提示「未检测到 lark CLI」，带文档链接提问返回安装认证引导（不执行任何命令）；接入真实 CLI（`LARK_CLI` 或 PATH）后自动生效，无需改动本项目。
 
 ## 依赖说明
 

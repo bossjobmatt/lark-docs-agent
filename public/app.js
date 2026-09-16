@@ -122,7 +122,10 @@ function refresh(history) {
   scrollBottom();
 }
 
-function showWelcome() {
+function showWelcome(larkAvailable = true) {
+  const larkHint = larkAvailable
+    ? ""
+    : '<p style="color:#b45309">⚠️ 未检测到本地已认证的 lark CLI——解析飞书/Lark 文档需要本地安装并完成认证（<code>LARK_CLI</code> 环境变量或 PATH 中的 <code>lark</code>）。安装后重启本服务即可。</p>';
   chatEl.appendChild(
     renderMessage({
       role: "assistant",
@@ -130,6 +133,7 @@ function showWelcome() {
       html:
         "<p>你好！我是 <b>Lark 文档助手</b> 🤖</p>" +
         "<p>把 <b>飞书/Lark 文档链接</b> 和你的问题一起发给我，我会调用本地 Lark CLI 读取文档后回答，并支持多轮追问。</p>" +
+        larkHint +
         "<p>试试点击下方的示例文档，或粘贴：<code>https://demo.feishu.cn/docx/doccnABC123xyz</code></p>",
     })
   );
@@ -254,25 +258,31 @@ async function sendStreaming(text, typing) {
   if (!finished && !errMsg) throw new Error("流式连接提前结束");
 }
 
-function updateBadge(mode, model, agentMode) {
+function updateBadge(mode, model, agentMode, lark) {
   if (agentMode === "pi") {
     badgeEl.className = "badge";
     badgeEl.textContent = "pi Agent 模式";
-    return;
-  }
-  if (mode === "llm") {
+  } else if (mode === "llm") {
     badgeEl.className = "badge";
     badgeEl.textContent = `LLM 模式${model ? ` · ${model}` : ""}`;
   } else {
     badgeEl.className = "badge sim";
     badgeEl.textContent = "模拟模式（未配置 LLM）";
   }
+  if (lark && !lark.available) {
+    badgeEl.className = "badge sim";
+    badgeEl.title = "解析飞书/Lark 文档需要本地安装并认证 lark CLI（LARK_CLI 环境变量或 PATH 中的 lark）。";
+    badgeEl.textContent += " · 未检测到 lark CLI";
+  }
 }
+
+let lastHealth = null;
 
 async function refreshHealth() {
   try {
     const health = await fetch("/api/health").then((r) => r.json());
-    updateBadge(health.mode, health.model, health.agentMode);
+    lastHealth = health;
+    updateBadge(health.mode, health.model, health.agentMode, health.lark);
     if (health.agentMode === "pi" && health.piAvailable === false) {
       badgeEl.textContent = "pi Agent 模式（SDK 未安装，将降级）";
       badgeEl.className = "badge sim";
@@ -542,6 +552,10 @@ clearBtn.addEventListener("click", async () => {
 
   try {
     const { items } = await fetch("/api/examples").then((r) => r.json());
+    // 未检测到 lark CLI（或列表为空）时隐藏整行提示，避免出现悬空标签
+    if (!items || !items.length) {
+      document.getElementById("tips").classList.add("hidden");
+    }
     for (const d of items || []) {
       const chip = el("button", "example-chip");
       chip.type = "button";
@@ -554,7 +568,9 @@ clearBtn.addEventListener("click", async () => {
       });
       examplesEl.appendChild(chip);
     }
-  } catch { /* 示例加载失败不影响主流程 */ }
+  } catch {
+    document.getElementById("tips").classList.add("hidden");
+  }
 
   if (sessionId) {
     try {
@@ -565,5 +581,5 @@ clearBtn.addEventListener("click", async () => {
       }
     } catch { /* 落到欢迎页 */ }
   }
-  showWelcome();
+  showWelcome(lastHealth ? (lastHealth.lark ? lastHealth.lark.available : true) : true);
 })();

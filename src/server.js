@@ -6,7 +6,7 @@ const agent = require("./agent");
 const llm = require("./llm");
 const llmConfig = require("./llm-config");
 const piAgent = require("./pi-agent");
-const { runLarkCli } = require("./lark");
+const { runLarkCli, cliStatus } = require("./lark");
 const protocol = require("./protocol");
 
 const PORT = Number(process.env.PORT) || 3737;
@@ -65,6 +65,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && url.pathname === "/api/health") {
       const configured = llmConfig.isConfigured();
       const cfg = llmConfig.publicConfig();
+      const lark = await cliStatus();
       return send(res, 200, {
         ok: true,
         mode: configured ? "llm" : "sim",
@@ -72,6 +73,7 @@ const server = http.createServer(async (req, res) => {
         apiType: cfg.apiType,
         agentMode: cfg.agentMode,
         piAvailable: cfg.agentMode === "pi" ? await piAgent.isAvailable() : null,
+        lark: { available: lark.available, source: lark.source, path: lark.path },
         time: new Date().toISOString(),
       });
     }
@@ -202,8 +204,9 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => {
+server.listen(PORT, HOST, async () => {
   const cfg = llmConfig.publicConfig();
+  const lark = await cliStatus();
   console.log(`Lark 文档助手已启动: http://${HOST}:${PORT}`);
   console.log(
     `Agent 模式: ${cfg.agentMode === "pi" ? "pi Agent（模型自主调用 lark CLI）" : "内置编排（服务端预取文档）"}`
@@ -211,5 +214,13 @@ server.listen(PORT, HOST, () => {
   console.log(
     `LLM: ${llmConfig.isConfigured() ? `${cfg.apiType} · ${cfg.model}` : "未配置（内置模式将以模拟回复运行）"}`
   );
-  console.log(`Lark CLI: ${process.env.LARK_CLI || "bin/lark（模拟实现）"}`);
+  console.log(
+    `Lark CLI: ${
+      lark.available
+        ? lark.source === "env"
+          ? `${lark.path}（LARK_CLI 指定）`
+          : "PATH 中的 lark（已认证）"
+        : "未检测到已认证的 lark CLI —— 解析飞书文档需要本地安装并认证（LARK_CLI 或 PATH）"
+    }`
+  );
 });
