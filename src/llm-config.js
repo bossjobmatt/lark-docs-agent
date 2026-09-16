@@ -48,13 +48,23 @@ function publicConfig() {
   return { apiType, baseUrl, model, hasKey: Boolean(apiKey), keyMasked: maskKey(apiKey), agentMode };
 }
 
+/** 补丁字段归一化（setConfig 与 mergeConfig 共享）：apiType 枚举校验、baseUrl 去尾斜杠、
+ *  model/apiKey trim；空值字段一律不产出（调用方语义 = 保持原值不变） */
+function applyPatch(patch = {}) {
+  const out = {};
+  if (patch.apiType === "chat" || patch.apiType === "responses") out.apiType = patch.apiType;
+  const baseUrl = typeof patch.baseUrl === "string" ? patch.baseUrl.trim() : "";
+  if (baseUrl) out.baseUrl = baseUrl.replace(/\/+$/, "");
+  const model = typeof patch.model === "string" ? patch.model.trim() : "";
+  if (model) out.model = model;
+  const apiKey = typeof patch.apiKey === "string" ? patch.apiKey.trim() : "";
+  if (apiKey) out.apiKey = apiKey;
+  return out;
+}
+
 /** 保存配置；apiKey 为空字符串表示保持原值不变 */
 function setConfig(patch = {}) {
-  const next = { ...config };
-  if (patch.apiType === "chat" || patch.apiType === "responses") next.apiType = patch.apiType;
-  if (typeof patch.baseUrl === "string" && patch.baseUrl.trim()) next.baseUrl = patch.baseUrl.trim().replace(/\/+$/, "");
-  if (typeof patch.model === "string" && patch.model.trim()) next.model = patch.model.trim();
-  if (typeof patch.apiKey === "string" && patch.apiKey.trim()) next.apiKey = patch.apiKey.trim();
+  const next = { ...config, ...applyPatch(patch) };
   if (patch.agentMode === "pi" || patch.agentMode === "builtin") next.agentMode = patch.agentMode;
   config = next;
   persist();
@@ -79,13 +89,8 @@ const getApiKey = () => config.apiKey;
 const getConfig = () => config;
 
 /** 用传入（或当前）配置合并出一份临时配置，不污染当前配置 */
-function mergeCfg(overrides = {}) {
-  const tempCfg = { ...config };
-  if (overrides.apiType === "chat" || overrides.apiType === "responses") tempCfg.apiType = overrides.apiType;
-  if (overrides.baseUrl && String(overrides.baseUrl).trim()) tempCfg.baseUrl = String(overrides.baseUrl).trim().replace(/\/+$/, "");
-  if (overrides.model && String(overrides.model).trim()) tempCfg.model = String(overrides.model).trim();
-  if (overrides.apiKey && String(overrides.apiKey).trim()) tempCfg.apiKey = String(overrides.apiKey).trim();
-  return tempCfg;
+function mergeConfig(overrides = {}) {
+  return { ...config, ...applyPatch(overrides) };
 }
 
-module.exports = { isConfigured, getApiKey, getConfig, publicConfig, setConfig, resetConfig, mergeCfg };
+module.exports = { isConfigured, getApiKey, getConfig, publicConfig, setConfig, resetConfig, mergeConfig };

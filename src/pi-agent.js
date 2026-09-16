@@ -13,7 +13,7 @@ const os = require("os");
 const { Type } = require("typebox");
 const llmConfig = require("./llm-config");
 const { runLarkCli } = require("./lark");
-const { makeReply, toolEvent, deltaEvent } = require("./protocol");
+const { makeReply, toolEmitter, deltaEvent } = require("./protocol");
 
 const TOOL_NAME = "lark_doc_get";
 const PROMPT_TIMEOUT_MS = Number(process.env.PI_PROMPT_TIMEOUT_MS) || 120000;
@@ -210,19 +210,30 @@ function withTimeout(promise, ms, label) {
 
 /**
  * 运行一轮 pi Agent 对话。
- * 提供 onEvent 时逐段回调流式事件（tool 快照 / delta 增量，契约见 protocol.js）。
+ * 提供 onEvent 时逐段回调流式事件（契约见 protocol.js）；提供 signal 时客户端断开会中止会话内的
+ * pi 上游请求（与 PROMPT_TIMEOUT_MS 超时走同一条 abort 路径）。
  * 返回完整回复对象（makeReply 结构）；失败抛错，由上层降级。
  */
-async function run(message, sessionId, { onEvent } = {}) {
+async function run(message, sessionId, { onEvent, signal } = {}) {
   const pi = await loadPi();
   if (!pi) throw new Error("pi SDK 未安装（npm i @earendil-works/pi-coding-agent）");
 
   const entry = await getOrCreateSession(pi, sessionId);
   const toolCalls = [];
 
+  if (signal && signal.aborted) throw new Error("客户端已取消");
+
   // 同一会话串行执行，避免 prompt 并发冲突
   const task = entry.busy.then(async () => {
     const unsubscribe = bindToolEvents(entry, toolCalls, onEvent);
+    const onAbort = () => {
+      try {
+        entry.session.abort();
+      } catch {
+        /* 会话可能已结束 */
+      }
+    };
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
     try {
       await withTimeout(entry.session.prompt(message), PROMPT_TIMEOUT_MS, "pi 处理超时");
     } catch (e) {
@@ -234,6 +245,7 @@ async function run(message, sessionId, { onEvent } = {}) {
       throw e;
     } finally {
       unsubscribe();
+      if (signal) signal.removeEventListener("abort", onAbort);
     }
     return extractReply(entry.session, toolCalls);
   });
@@ -244,7 +256,7 @@ async function run(message, sessionId, { onEvent } = {}) {
 /** 订阅工具执行与文本增量事件，映射为前端徽标/流式结构；返回退订函数 */
 function bindToolEvents(entry, toolCalls, onEvent) {
   const pending = new Map(); // toolCallId -> index in toolCalls
-  const emitTools = () => onEvent && onEvent(toolEvent([...toolCalls]));
+  const emitTools = toolEmitter(onEvent, toolCalls);
   const unsubscribe = entry.session.subscribe((event) => {
     if (event.type === "tool_execution_start") {
       pending.set(event.toolCallId, toolCalls.length);

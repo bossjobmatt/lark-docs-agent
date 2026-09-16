@@ -20,14 +20,20 @@ function extractResponseText(json) {
   return text;
 }
 
+/** 按 apiType 构造 endpoint 与请求体（chat 与 chatStream 共享，避免分支重复） */
+function buildRequest(cfg, messages, stream) {
+  const endpoint = cfg.apiType === "responses" ? "/responses" : "/chat/completions";
+  const base =
+    cfg.apiType === "responses"
+      ? { model: cfg.model, input: messages }
+      : { model: cfg.model, messages };
+  return { endpoint, body: { ...base, temperature: 0.3, ...(stream ? { stream: true } : {}) } };
+}
+
 async function chat(messages, { timeoutMs = 60000, cfg = llmConfig.getConfig(), signal } = {}) {
   const ac = signal ? null : new AbortController();
   const timer = ac ? setTimeout(() => ac.abort(), timeoutMs) : null;
-  const endpoint = cfg.apiType === "responses" ? "/responses" : "/chat/completions";
-  const body =
-    cfg.apiType === "responses"
-      ? { model: cfg.model, input: messages, temperature: 0.3 }
-      : { model: cfg.model, messages, temperature: 0.3 };
+  const { endpoint, body } = buildRequest(cfg, messages, false);
 
   try {
     const resp = await fetch(`${cfg.baseUrl.replace(/\/+$/, "")}${endpoint}`, {
@@ -66,14 +72,11 @@ async function chatStream(messages, { onDelta, timeoutMs = 120000, firstByteMs =
     phaseTimer = setTimeout(() => ac.abort(), ms);
   };
 
-  const endpoint = cfg.apiType === "responses" ? "/responses" : "/chat/completions";
-  const body =
-    cfg.apiType === "responses"
-      ? { model: cfg.model, input: messages, temperature: 0.3, stream: true }
-      : { model: cfg.model, messages, temperature: 0.3, stream: true };
+  const { endpoint, body } = buildRequest(cfg, messages, true);
 
   let full = "";
   try {
+    if (signal && signal.aborted) throw new Error("客户端已取消");
     const resp = await fetch(`${cfg.baseUrl.replace(/\/+$/, "")}${endpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${cfg.apiKey}` },
@@ -127,7 +130,7 @@ async function chatStream(messages, { onDelta, timeoutMs = 120000, firstByteMs =
 
 /** 用传入（或当前）配置发一条真实请求验证连通性；不落盘、不影响当前配置 */
 async function test(overrides = {}) {
-  const tempCfg = llmConfig.mergeCfg(overrides);
+  const tempCfg = llmConfig.mergeConfig(overrides);
   const t0 = Date.now();
   const sample = await chat([{ role: "user", content: "连通性测试，请回复：连接成功" }], { timeoutMs: 15000, cfg: tempCfg });
   return { ok: true, apiType: tempCfg.apiType, model: tempCfg.model, latencyMs: Date.now() - t0, sample: sample.slice(0, 100) };
@@ -135,7 +138,7 @@ async function test(overrides = {}) {
 
 /** 拉取 OpenAI 兼容模型列表（GET {baseUrl}/models）；兼容 data[]/models[] 两种返回结构 */
 async function listModels(overrides = {}) {
-  const tempCfg = llmConfig.mergeCfg(overrides);
+  const tempCfg = llmConfig.mergeConfig(overrides);
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 15000);
   try {

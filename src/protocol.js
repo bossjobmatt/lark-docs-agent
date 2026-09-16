@@ -35,4 +35,9 @@ const deltaEvent = (text) => ({ type: "delta", text });
 const doneEvent = (sessionId, reply) => ({ type: "done", sessionId, reply });
 const errorEvent = (message) => ({ type: "error", error: message });
 
-module.exports = { makeReply, nowTs, startEvent, toolEvent, deltaEvent, doneEvent, errorEvent };
+/** 工具徽标快照发射器：绑定事件回调与累积 toolCalls 列表，agent 与 pi 两侧共用 */
+function toolEmitter(onEvent, toolCalls) {
+  return () => onEvent && onEvent(toolEvent([...toolCalls]));
+}
+
+module.exports = { makeReply, nowTs, startEvent, toolEvent, deltaEvent, doneEvent, errorEvent, toolEmitter };

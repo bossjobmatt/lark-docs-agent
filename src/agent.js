@@ -3,7 +3,7 @@ const llm = require("./llm");
 const llmConfig = require("./llm-config");
 const piAgent = require("./pi-agent");
 const store = require("./store");
-const { makeReply, nowTs, toolEvent, deltaEvent } = require("./protocol");
+const { makeReply, nowTs, toolEmitter, deltaEvent } = require("./protocol");
 
 // 从用户消息中提取飞书/Lark 文档标识：完整链接，或 doccn 开头的裸 token
 const LARK_URL_RE = /(?:https?:\/\/)?[a-zA-Z0-9-]+\.(?:feishu\.cn|larksuite\.com|larkoffice\.com)\/(?:docx|docs|wiki)\/([A-Za-z0-9]+)/g;
@@ -175,17 +175,12 @@ async function fakeStream(content, onEvent) {
 
 /**
  * 内置编排模式：服务端预取文档 → LLM/模拟规则回答。
- * 提供 onEvent 时逐段回调 { type: "tool", toolCalls }（快照）与 { type: "delta", text }（增量）。
- * 返回 { role, content, html, toolCalls, mode, ts }（不写入会话）。
- */
-/**
- * 内置编排模式：服务端预取文档 → LLM/模拟规则回答。
- * 返回 { role, content, html, toolCalls, mode, ts }（不写入会话）。
+ * 提供 onEvent 时逐段回调流式事件（契约见 protocol.js）；返回完整回复对象（不写入会话）。
  */
 async function builtinCore(message, session, { onEvent, signal } = {}) {
   // 1) 工具调用：读取文档（带会话级缓存）
   const toolCalls = [];
-  const emitTools = () => onEvent && onEvent(toolEvent([...toolCalls]));
+  const emitTools = toolEmitter(onEvent, toolCalls);
   for (const token of extractTokens(message)) {
     if (session.docs[token]) {
       toolCalls.push({
@@ -212,7 +207,7 @@ async function builtinCore(message, session, { onEvent, signal } = {}) {
     emitTools();
   }
 
-  // 2) 生成回复：LLM 模式，失败/未配置则降级为模拟模式
+  // 2) 生成回复：LLM 模式，失败/未配置则降级为模拟模式（降级内容同样假流式，保持打字体验一致）
   let mode = "sim";
   let content;
   if (llmConfig.isConfigured()) {
@@ -224,6 +219,7 @@ async function builtinCore(message, session, { onEvent, signal } = {}) {
       mode = "llm";
     } catch (e) {
       content = `> ⚠️ LLM 调用失败（${e.message}），已降级为本地模拟回复。\n\n` + buildSimReply(message, session);
+      if (onEvent) await fakeStream(content, onEvent);
     }
   } else {
     content = buildSimReply(message, session);
@@ -246,7 +242,7 @@ async function handle(message, session, { onEvent, signal } = {}) {
   let reply;
   if (llmConfig.publicConfig().agentMode === "pi") {
     try {
-      reply = await piAgent.run(message, session.id, { onEvent });
+      reply = await piAgent.run(message, session.id, { onEvent, signal });
     } catch (e) {
       const base = await builtinCore(message, session, { onEvent, signal });
       const note = `> ⚠️ pi Agent 调用失败（${e.message}），已降级为内置模式。\n\n`;

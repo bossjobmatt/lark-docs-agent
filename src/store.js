@@ -10,10 +10,16 @@ const { renderMarkdown } = require("./markdown");
 // - 落盘只存紧凑 JSON 与消息的 Markdown 原文（html 渲染结果加载时现算，docs 缓存只在内存）
 // - 每会话最多保留最近 SESSION_MAX_MESSAGES 条消息，docs 缓存最多 MAX_DOCS 篇
 // - 会话自动淘汰：不活跃超过 SESSION_TTL_DAYS 天、或总数超过 SESSION_MAX_COUNT 即删
+/** 读数字环境变量：未设置/非法值回落默认，显式 0 等合法数字一律生效 */
+function numEnv(name, fallback) {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 const DATA_FILE = process.env.SESSIONS_FILE || path.join(__dirname, "..", "data", "sessions.json");
-const TTL_MS = (Number(process.env.SESSION_TTL_DAYS) || 7) * 24 * 60 * 60 * 1000;
-const MAX_SESSIONS = Number(process.env.SESSION_MAX_COUNT) || 100;
-const MAX_MESSAGES = Number(process.env.SESSION_MAX_MESSAGES) || 50;
+const TTL_MS = numEnv("SESSION_TTL_DAYS", 7) * 24 * 60 * 60 * 1000;
+const MAX_SESSIONS = numEnv("SESSION_MAX_COUNT", 100);
+const MAX_MESSAGES = numEnv("SESSION_MAX_MESSAGES", 50);
 const MAX_DOCS = 20;
 
 const sessions = new Map();
@@ -131,12 +137,12 @@ function appendMessages(id, msgs) {
   persist();
 }
 
-/** 缓存会话内已拉取的文档（仅内存，docs 不落盘） */
+/** 缓存会话内已拉取的文档（docs 不落盘；拉取算会话活动，刷新触活时间） */
 function cacheDoc(id, token, doc) {
   const session = sessions.get(id);
   if (!session || !token || !doc) return;
   session.docs[token] = doc;
-  trim(session);
+  touch(session);
 }
 
 function clear(id) {
