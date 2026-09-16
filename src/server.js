@@ -4,8 +4,10 @@ const path = require("path");
 const store = require("./store");
 const agent = require("./agent");
 const llm = require("./llm");
+const llmConfig = require("./llm-config");
 const piAgent = require("./pi-agent");
 const { runLarkCli } = require("./lark");
+const protocol = require("./protocol");
 
 const PORT = Number(process.env.PORT) || 3737;
 const HOST = process.env.HOST || "127.0.0.1"; // 默认只绑定本机，避免内网暴露
@@ -61,8 +63,8 @@ const server = http.createServer(async (req, res) => {
 
     // 健康检查 / 模式探测
     if (req.method === "GET" && url.pathname === "/api/health") {
-      const configured = llm.isConfigured();
-      const cfg = llm.publicConfig();
+      const configured = llmConfig.isConfigured();
+      const cfg = llmConfig.publicConfig();
       return send(res, 200, {
         ok: true,
         mode: configured ? "llm" : "sim",
@@ -76,18 +78,18 @@ const server = http.createServer(async (req, res) => {
 
     // LLM 配置：读取（Key 打码）/ 保存 / 恢复默认
     if (req.method === "GET" && url.pathname === "/api/llm/config") {
-      return send(res, 200, llm.publicConfig());
+      return send(res, 200, llmConfig.publicConfig());
     }
     if (req.method === "POST" && url.pathname === "/api/llm/config") {
       const body = JSON.parse((await readBody(req)) || "{}");
-      const cfg = llm.setConfig(body);
+      const cfg = llmConfig.setConfig(body);
       piAgent.syncConfig(); // pi 模式：凭据变化时立即刷新自有 agentDir
-      return send(res, 200, { ok: true, config: cfg, mode: llm.isConfigured() ? "llm" : "sim" });
+      return send(res, 200, { ok: true, config: cfg, mode: llmConfig.isConfigured() ? "llm" : "sim" });
     }
     if (req.method === "POST" && url.pathname === "/api/llm/config/reset") {
-      const cfg = llm.resetConfig();
+      const cfg = llmConfig.resetConfig();
       piAgent.syncConfig();
-      return send(res, 200, { ok: true, config: cfg, mode: llm.isConfigured() ? "llm" : "sim" });
+      return send(res, 200, { ok: true, config: cfg, mode: llmConfig.isConfigured() ? "llm" : "sim" });
     }
     // 连接测试：用表单当前值（Key 留空则用已存值）发一条真实请求
     if (req.method === "POST" && url.pathname === "/api/llm/test") {
@@ -128,7 +130,6 @@ const server = http.createServer(async (req, res) => {
 
       const session = store.getOrCreate(body.sessionId);
       const reply = await agent.handle(message, session);
-      store.persist();
       return send(res, 200, {
         sessionId: session.id,
         mode: reply.mode,
@@ -155,17 +156,16 @@ const server = http.createServer(async (req, res) => {
           /* 连接已断开，忽略 */
         }
       };
-      writeEvent({ type: "start", sessionId: session.id });
+      writeEvent(protocol.startEvent(session.id));
 
       const ac = new AbortController();
       res.on("close", () => ac.abort()); // 客户端断开时中止上游 LLM 请求
 
       try {
         const reply = await agent.handle(message, session, { onEvent: writeEvent, signal: ac.signal });
-        store.persist();
-        writeEvent({ type: "done", sessionId: session.id, reply });
+        writeEvent(protocol.doneEvent(session.id, reply));
       } catch (e) {
-        writeEvent({ type: "error", error: e.message });
+        writeEvent(protocol.errorEvent(e.message));
       } finally {
         res.end();
       }
@@ -187,13 +187,13 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, HOST, () => {
-  const cfg = llm.publicConfig();
+  const cfg = llmConfig.publicConfig();
   console.log(`Lark 文档助手已启动: http://${HOST}:${PORT}`);
   console.log(
     `Agent 模式: ${cfg.agentMode === "pi" ? "pi Agent（模型自主调用 lark CLI）" : "内置编排（服务端预取文档）"}`
   );
   console.log(
-    `LLM: ${llm.isConfigured() ? `${cfg.apiType} · ${cfg.model}` : "未配置（内置模式将以模拟回复运行）"}`
+    `LLM: ${llmConfig.isConfigured() ? `${cfg.apiType} · ${cfg.model}` : "未配置（内置模式将以模拟回复运行）"}`
   );
   console.log(`Lark CLI: ${process.env.LARK_CLI || "bin/lark（模拟实现）"}`);
 });

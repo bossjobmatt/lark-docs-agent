@@ -2,82 +2,9 @@
  * OpenAI 兼容 LLM 客户端：支持两种 API 类型
  *   - "chat"      Chat Completions（POST {baseUrl}/chat/completions）
  *   - "responses" Responses        （POST {baseUrl}/responses）
- *
- * 配置优先级：界面保存的配置（data/llm-config.json）> 环境变量 > 内置默认。
- * 环境变量（作为默认值）：LLM_API_KEY / OPENAI_API_KEY、LLM_BASE_URL / OPENAI_BASE_URL、
- * LLM_MODEL、LLM_API_TYPE。
+ * 配置来源与优先级见 llm-config.js。
  */
-const fs = require("fs");
-const path = require("path");
-
-const CONFIG_FILE = path.join(__dirname, "..", "data", "llm-config.json");
-
-const DEFAULTS = {
-  apiType: process.env.LLM_API_TYPE || "chat", // "chat" | "responses"
-  baseUrl: process.env.LLM_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
-  apiKey: process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || "",
-  model: process.env.LLM_MODEL || "gpt-4o-mini",
-  agentMode: process.env.AGENT_MODE === "pi" ? "pi" : "builtin", // "builtin" | "pi"
-};
-
-function loadFile() {
-  try {
-    return JSON.parse(fs.readFileSync(CONFIG_FILE, "utf8"));
-  } catch {
-    return {};
-  }
-}
-
-let config = { ...DEFAULTS, ...loadFile() };
-
-function persist() {
-  try {
-    fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true });
-    fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
-  } catch (e) {
-    console.error("[llm] 配置持久化失败:", e.message);
-  }
-}
-
-function maskKey(key) {
-  if (!key) return "";
-  if (key.length <= 8) return "****";
-  return key.slice(0, 3) + "****" + key.slice(-4);
-}
-
-/** 对外安全的配置视图（不返回明文 Key） */
-function publicConfig() {
-  const { apiType, baseUrl, model, apiKey, agentMode } = config;
-  return { apiType, baseUrl, model, hasKey: Boolean(apiKey), keyMasked: maskKey(apiKey), agentMode };
-}
-
-/** 保存配置；apiKey 为空字符串表示保持原值不变 */
-function setConfig(patch = {}) {
-  const next = { ...config };
-  if (patch.apiType === "chat" || patch.apiType === "responses") next.apiType = patch.apiType;
-  if (typeof patch.baseUrl === "string" && patch.baseUrl.trim()) next.baseUrl = patch.baseUrl.trim().replace(/\/+$/, "");
-  if (typeof patch.model === "string" && patch.model.trim()) next.model = patch.model.trim();
-  if (typeof patch.apiKey === "string" && patch.apiKey.trim()) next.apiKey = patch.apiKey.trim();
-  if (patch.agentMode === "pi" || patch.agentMode === "builtin") next.agentMode = patch.agentMode;
-  config = next;
-  persist();
-  return publicConfig();
-}
-
-/** 清除界面保存的配置，回落到环境变量/默认值 */
-function resetConfig() {
-  config = { ...DEFAULTS };
-  try {
-    fs.unlinkSync(CONFIG_FILE);
-  } catch {
-    /* 本来就没有 */
-  }
-  return publicConfig();
-}
-
-const isConfigured = () => Boolean(config.apiKey);
-/** 内部用途：读取明文 Key（如 pi 模式生成自有 provider 配置时） */
-const getApiKey = () => config.apiKey;
+const llmConfig = require("./llm-config");
 
 function extractResponseText(json) {
   // Responses API：优先从 output[].content[].output_text 拼接，兼容聚合字段 output_text
@@ -93,7 +20,7 @@ function extractResponseText(json) {
   return text;
 }
 
-async function chat(messages, { timeoutMs = 60000, cfg = config, signal } = {}) {
+async function chat(messages, { timeoutMs = 60000, cfg = llmConfig.getConfig(), signal } = {}) {
   const ac = signal ? null : new AbortController();
   const timer = ac ? setTimeout(() => ac.abort(), timeoutMs) : null;
   const endpoint = cfg.apiType === "responses" ? "/responses" : "/chat/completions";
@@ -127,7 +54,7 @@ async function chat(messages, { timeoutMs = 60000, cfg = config, signal } = {}) 
  * 流式对话：入参与 chat() 相同，额外通过 onDelta(增量文本) 逐段回调，返回完整文本。
  * 超时策略：firstByteMs（等待首块）/ idleMs（两块之间空闲）比整体超时更贴合流式。
  */
-async function chatStream(messages, { onDelta, timeoutMs = 120000, firstByteMs = 30000, idleMs = 30000, cfg = config, signal } = {}) {
+async function chatStream(messages, { onDelta, timeoutMs = 120000, firstByteMs = 30000, idleMs = 30000, cfg = llmConfig.getConfig(), signal } = {}) {
   const ac = new AbortController();
   if (signal) signal.addEventListener("abort", () => ac.abort(), { once: true });
   const overall = setTimeout(() => ac.abort(), timeoutMs);
@@ -198,19 +125,9 @@ async function chatStream(messages, { onDelta, timeoutMs = 120000, firstByteMs =
   }
 }
 
-/** 用传入（或当前）配置合并出一份临时配置，不污染当前配置 */
-function mergeCfg(overrides = {}) {
-  const tempCfg = { ...config };
-  if (overrides.apiType === "chat" || overrides.apiType === "responses") tempCfg.apiType = overrides.apiType;
-  if (overrides.baseUrl && String(overrides.baseUrl).trim()) tempCfg.baseUrl = String(overrides.baseUrl).trim().replace(/\/+$/, "");
-  if (overrides.model && String(overrides.model).trim()) tempCfg.model = String(overrides.model).trim();
-  if (overrides.apiKey && String(overrides.apiKey).trim()) tempCfg.apiKey = String(overrides.apiKey).trim();
-  return tempCfg;
-}
-
 /** 用传入（或当前）配置发一条真实请求验证连通性；不落盘、不影响当前配置 */
 async function test(overrides = {}) {
-  const tempCfg = mergeCfg(overrides);
+  const tempCfg = llmConfig.mergeCfg(overrides);
   const t0 = Date.now();
   const sample = await chat([{ role: "user", content: "连通性测试，请回复：连接成功" }], { timeoutMs: 15000, cfg: tempCfg });
   return { ok: true, apiType: tempCfg.apiType, model: tempCfg.model, latencyMs: Date.now() - t0, sample: sample.slice(0, 100) };
@@ -218,7 +135,7 @@ async function test(overrides = {}) {
 
 /** 拉取 OpenAI 兼容模型列表（GET {baseUrl}/models）；兼容 data[]/models[] 两种返回结构 */
 async function listModels(overrides = {}) {
-  const tempCfg = mergeCfg(overrides);
+  const tempCfg = llmConfig.mergeCfg(overrides);
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), 15000);
   try {
@@ -245,4 +162,4 @@ async function listModels(overrides = {}) {
   }
 }
 
-module.exports = { isConfigured, getApiKey, chat, chatStream, test, listModels, publicConfig, setConfig, resetConfig };
+module.exports = { chat, chatStream, test, listModels };

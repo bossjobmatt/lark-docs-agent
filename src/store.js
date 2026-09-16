@@ -4,11 +4,13 @@ const crypto = require("crypto");
 const { renderMarkdown } = require("./markdown");
 
 // 会话持久化到 data/sessions.json，服务重启后多轮对话不丢。
+// 接口约定：调用者只读 session 对象、只通过 appendMessages/cacheDoc 变更——
+// 模块自己负责裁剪、触活与落盘，调用者无需知道何时持久化。
 // 控制存储体积的约定：
 // - 落盘只存紧凑 JSON 与消息的 Markdown 原文（html 渲染结果加载时现算，docs 缓存只在内存）
 // - 每会话最多保留最近 SESSION_MAX_MESSAGES 条消息，docs 缓存最多 MAX_DOCS 篇
 // - 会话自动淘汰：不活跃超过 SESSION_TTL_DAYS 天、或总数超过 SESSION_MAX_COUNT 即删
-const DATA_FILE = path.join(__dirname, "..", "data", "sessions.json");
+const DATA_FILE = process.env.SESSIONS_FILE || path.join(__dirname, "..", "data", "sessions.json");
 const TTL_MS = (Number(process.env.SESSION_TTL_DAYS) || 7) * 24 * 60 * 60 * 1000;
 const MAX_SESSIONS = Number(process.env.SESSION_MAX_COUNT) || 100;
 const MAX_MESSAGES = Number(process.env.SESSION_MAX_MESSAGES) || 50;
@@ -120,6 +122,23 @@ const get = (id) => {
 };
 const getOrCreate = (id) => get(id) || create();
 
+/** 追加消息（含触活、裁剪与防抖落盘）；会话不存在时静默忽略 */
+function appendMessages(id, msgs) {
+  const session = sessions.get(id);
+  if (!session || !Array.isArray(msgs) || !msgs.length) return;
+  session.messages.push(...msgs);
+  touch(session);
+  persist();
+}
+
+/** 缓存会话内已拉取的文档（仅内存，docs 不落盘） */
+function cacheDoc(id, token, doc) {
+  const session = sessions.get(id);
+  if (!session || !token || !doc) return;
+  session.docs[token] = doc;
+  trim(session);
+}
+
 function clear(id) {
   const session = get(id);
   if (session) {
@@ -130,4 +149,4 @@ function clear(id) {
   return session;
 }
 
-module.exports = { getOrCreate, get, clear, persist };
+module.exports = { getOrCreate, get, clear, appendMessages, cacheDoc };

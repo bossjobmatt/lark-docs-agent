@@ -11,9 +11,9 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { Type } = require("typebox");
-const llm = require("./llm");
+const llmConfig = require("./llm-config");
 const { runLarkCli } = require("./lark");
-const { renderMarkdown } = require("./markdown");
+const { makeReply, toolEvent, deltaEvent } = require("./protocol");
 
 const TOOL_NAME = "lark_doc_get";
 const PROMPT_TIMEOUT_MS = Number(process.env.PI_PROMPT_TIMEOUT_MS) || 120000;
@@ -101,7 +101,7 @@ function resolveAgentDir() {
   if (process.env.PI_AGENT_DIR) return { dir: process.env.PI_AGENT_DIR, source: "env(PI_AGENT_DIR)" };
 
   // 2) 界面已配置 LLM 凭据 → 生成/刷新自有目录（主路径，无 pi 安装也可运行）
-  if (llm.isConfigured()) {
+  if (llmConfig.isConfigured()) {
     try {
       writeOwnConfig(OWN_AGENT_DIR);
       return { dir: OWN_AGENT_DIR, source: "app(界面配置)" };
@@ -119,8 +119,8 @@ function resolveAgentDir() {
 
 /** 把界面 LLM 配置写成 pi 的 models.json/settings.json；配置变化时废弃旧会话池 */
 function writeOwnConfig(dir) {
-  const cfg = llm.publicConfig();
-  const apiKey = llm.getApiKey();
+  const cfg = llmConfig.publicConfig();
+  const apiKey = llmConfig.getApiKey();
   const fingerprint = [cfg.baseUrl, cfg.model, cfg.apiType, apiKey].join("|");
   if (fingerprint === configFingerprint) return;
 
@@ -210,8 +210,8 @@ function withTimeout(promise, ms, label) {
 
 /**
  * 运行一轮 pi Agent 对话。
- * 提供 onEvent 时逐段回调 { type: "tool", toolCalls }（快照）与 { type: "delta", text }（增量）。
- * 返回 { content, html, toolCalls, mode: "pi" }；失败抛错，由上层降级。
+ * 提供 onEvent 时逐段回调流式事件（tool 快照 / delta 增量，契约见 protocol.js）。
+ * 返回完整回复对象（makeReply 结构）；失败抛错，由上层降级。
  */
 async function run(message, sessionId, { onEvent } = {}) {
   const pi = await loadPi();
@@ -244,7 +244,7 @@ async function run(message, sessionId, { onEvent } = {}) {
 /** 订阅工具执行与文本增量事件，映射为前端徽标/流式结构；返回退订函数 */
 function bindToolEvents(entry, toolCalls, onEvent) {
   const pending = new Map(); // toolCallId -> index in toolCalls
-  const emitTools = () => onEvent && onEvent({ type: "tool", toolCalls: [...toolCalls] });
+  const emitTools = () => onEvent && onEvent(toolEvent([...toolCalls]));
   const unsubscribe = entry.session.subscribe((event) => {
     if (event.type === "tool_execution_start") {
       pending.set(event.toolCallId, toolCalls.length);
@@ -269,7 +269,7 @@ function bindToolEvents(entry, toolCalls, onEvent) {
       // 转发正文增量；跳过 thinking 增量与工具参数增量
       const ame = event.assistantMessageEvent;
       if (onEvent && ame && ame.type === "text_delta" && ame.delta) {
-        onEvent({ type: "delta", text: ame.delta });
+        onEvent(deltaEvent(ame.delta));
       }
     }
   });
@@ -282,12 +282,12 @@ function extractReply(session, toolCalls) {
   const last = assistants[assistants.length - 1];
   const content = extractText(last);
   if (!content.trim()) throw new Error("pi 未返回文本内容");
-  return { content, html: renderMarkdown(content), toolCalls, mode: "pi" };
+  return makeReply(content, { mode: "pi", toolCalls });
 }
 
 /** 界面配置变化后立即同步自有 agentDir（供 /api/llm/config 保存时调用） */
 function syncConfig() {
-  if (!llm.isConfigured()) return;
+  if (!llmConfig.isConfigured()) return;
   try {
     writeOwnConfig(OWN_AGENT_DIR);
   } catch (e) {

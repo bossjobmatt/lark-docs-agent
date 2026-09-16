@@ -174,6 +174,7 @@ async function handleSend(text) {
 
 /**
  * 流式发送：POST /api/chat/stream，按行读 NDJSON 事件。
+ * 事件契约定义见 src/protocol.js（start / tool / delta / done / error）。
  * 流式期间在气泡里累积 Markdown 原文（打字机效果），done 后整体替换为服务端渲染的完整卡片。
  */
 async function sendStreaming(text, typing) {

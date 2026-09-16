@@ -1,7 +1,9 @@
 const { runLarkCli } = require("./lark");
 const llm = require("./llm");
+const llmConfig = require("./llm-config");
 const piAgent = require("./pi-agent");
-const { renderMarkdown } = require("./markdown");
+const store = require("./store");
+const { makeReply, nowTs, toolEvent, deltaEvent } = require("./protocol");
 
 // 从用户消息中提取飞书/Lark 文档标识：完整链接，或 doccn 开头的裸 token
 const LARK_URL_RE = /(?:https?:\/\/)?[a-zA-Z0-9-]+\.(?:feishu\.cn|larksuite\.com|larkoffice\.com)\/(?:docx|docs|wiki)\/([A-Za-z0-9]+)/g;
@@ -166,7 +168,7 @@ async function askLlm(question, session, { onDelta, signal } = {}) {
 async function fakeStream(content, onEvent) {
   const CHUNK = 64;
   for (let i = 0; i < content.length; i += CHUNK) {
-    onEvent({ type: "delta", text: content.slice(i, i + CHUNK) });
+    onEvent(deltaEvent(content.slice(i, i + CHUNK)));
     await new Promise((r) => setTimeout(r, 12));
   }
 }
@@ -183,7 +185,7 @@ async function fakeStream(content, onEvent) {
 async function builtinCore(message, session, { onEvent, signal } = {}) {
   // 1) 工具调用：读取文档（带会话级缓存）
   const toolCalls = [];
-  const emitTools = () => onEvent && onEvent({ type: "tool", toolCalls: [...toolCalls] });
+  const emitTools = () => onEvent && onEvent(toolEvent([...toolCalls]));
   for (const token of extractTokens(message)) {
     if (session.docs[token]) {
       toolCalls.push({
@@ -197,7 +199,7 @@ async function builtinCore(message, session, { onEvent, signal } = {}) {
     }
     const res = await runLarkCli(["doc", "get", token]);
     if (res.ok) {
-      session.docs[token] = res.data;
+      store.cacheDoc(session.id, token, res.data);
       toolCalls.push({
         tool: "lark doc get",
         args: token,
@@ -213,10 +215,10 @@ async function builtinCore(message, session, { onEvent, signal } = {}) {
   // 2) 生成回复：LLM 模式，失败/未配置则降级为模拟模式
   let mode = "sim";
   let content;
-  if (llm.isConfigured()) {
+  if (llmConfig.isConfigured()) {
     try {
       content = await askLlm(message, session, {
-        onDelta: onEvent && ((text) => onEvent({ type: "delta", text })),
+        onDelta: onEvent && ((text) => onEvent(deltaEvent(text))),
         signal,
       });
       mode = "llm";
@@ -228,14 +230,7 @@ async function builtinCore(message, session, { onEvent, signal } = {}) {
     if (onEvent) await fakeStream(content, onEvent);
   }
 
-  return {
-    role: "assistant",
-    content,
-    html: renderMarkdown(content),
-    toolCalls,
-    mode,
-    ts: new Date().toLocaleString("zh-CN", { hour12: false }),
-  };
+  return makeReply(content, { mode, toolCalls });
 }
 
 /**
@@ -246,35 +241,22 @@ async function builtinCore(message, session, { onEvent, signal } = {}) {
  * - 提供 onEvent 时逐段回调流式事件（tool 快照 / delta 增量），供 /api/chat/stream 使用。
  */
 async function handle(message, session, { onEvent, signal } = {}) {
-  session.messages.push({
-    role: "user",
-    content: message,
-    ts: new Date().toLocaleString("zh-CN", { hour12: false }),
-  });
+  store.appendMessages(session.id, [{ role: "user", content: message, ts: nowTs() }]);
 
   let reply;
-  if (llm.publicConfig().agentMode === "pi") {
+  if (llmConfig.publicConfig().agentMode === "pi") {
     try {
-      const r = await piAgent.run(message, session.id, { onEvent });
-      reply = {
-        role: "assistant",
-        content: r.content,
-        html: r.html,
-        toolCalls: r.toolCalls,
-        mode: "pi",
-        ts: new Date().toLocaleString("zh-CN", { hour12: false }),
-      };
+      reply = await piAgent.run(message, session.id, { onEvent });
     } catch (e) {
-      reply = await builtinCore(message, session, { onEvent, signal });
+      const base = await builtinCore(message, session, { onEvent, signal });
       const note = `> ⚠️ pi Agent 调用失败（${e.message}），已降级为内置模式。\n\n`;
-      reply.content = note + reply.content;
-      reply.html = renderMarkdown(reply.content);
+      reply = makeReply(note + base.content, { mode: base.mode, toolCalls: base.toolCalls });
     }
   } else {
     reply = await builtinCore(message, session, { onEvent, signal });
   }
 
-  session.messages.push(reply);
+  store.appendMessages(session.id, [reply]);
   return reply;
 }
 
