@@ -59,6 +59,19 @@ test("clear 清空消息与文档缓存；remove 删除整个会话", () => {
   assert.equal(store.get(s.id), null);
 });
 
+test("setTitle 设置标题并落盘，listSessions 优先使用生成标题", async () => {
+  const s = store.getOrCreate("");
+  store.appendMessages(s.id, [{ role: "user", content: "这是一条很长很长很长很长很长的首条消息内容" }]);
+  store.setTitle(s.id, "智能周报方案讨论");
+  const item = store.listSessions().find((x) => x.id === s.id);
+  assert.equal(item.title, "智能周报方案讨论", "应优先使用 LLM 生成的标题");
+
+  await new Promise((r) => setTimeout(r, 400)); // 等防抖落盘
+  const raw = JSON.parse(require("fs").readFileSync(process.env.SESSIONS_FILE, "utf8"));
+  const persisted = raw.find((p) => p.id === s.id);
+  assert.equal(persisted.title, "智能周报方案讨论", "标题应持久化到磁盘");
+});
+
 test("落盘为紧凑 JSON，仅存 Markdown 原文（无 html/docs 字段）", async () => {
   const file = process.env.SESSIONS_FILE;
   const s = store.getOrCreate("");

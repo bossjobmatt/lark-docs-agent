@@ -288,6 +288,25 @@ async function builtinCore(message, session, { onEvent, signal } = {}) {
  * - "builtin"：服务端预取文档 → LLM/模拟规则回答。
  * - 提供 onEvent 时逐段回调流式事件（tool 快照 / delta 增量），供 /api/chat/stream 使用。
  */
+/** 首轮回复后异步生成会话短标题：不阻塞回复，失败静默（保留首条消息截断回退） */
+function maybeGenerateTitle(session) {
+  if (session.title || !llmConfig.isConfigured()) return;
+  const firstUser = session.messages.find((m) => m.role === "user");
+  if (!firstUser) return;
+  llm.chat(
+    [
+      { role: "system", content: "为用户消息生成一个不超过 12 字的中文会话标题。直接输出标题文本，不要引号、句号或任何前缀说明。" },
+      { role: "user", content: String(firstUser.content).slice(0, 300) },
+    ],
+    { timeoutMs: 10000 }
+  )
+    .then((t) => {
+      const title = String(t).trim().replace(/^["'「」『』《《]+/, "").replace(/[」』》"。．.！!？?，,]+$/, "").trim();
+      if (title) store.setTitle(session.id, title);
+    })
+    .catch(() => {});
+}
+
 async function handle(message, session, { onEvent, signal } = {}) {
   store.appendMessages(session.id, [{ role: "user", content: message, ts: nowTs() }]);
 
@@ -305,6 +324,7 @@ async function handle(message, session, { onEvent, signal } = {}) {
   }
 
   store.appendMessages(session.id, [reply]);
+  maybeGenerateTitle(session);
   return reply;
 }
 

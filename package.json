@@ -1,6 +1,6 @@
 {
   "name": "lark-docs-server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "本地服务：AI Agent 通过（模拟）Lark CLI 读取飞书/Lark 文档，支持多轮对话与 Markdown 渲染",
   "main": "src/server.js",

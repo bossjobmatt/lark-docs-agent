@@ -44,6 +44,7 @@ try {
       id: s.id,
       createdAt: s.createdAt || updatedAt,
       updatedAt,
+      ...(s.title ? { title: s.title } : {}),
       messages: (s.messages || []).slice(-MAX_MESSAGES).map(rehydrateHtml),
       docs: {}, // docs 缓存只在内存，重启后同文档会重调 CLI
     });
@@ -90,6 +91,7 @@ function persist() {
         id: s.id,
         createdAt: s.createdAt,
         updatedAt: s.updatedAt,
+        ...(s.title ? { title: s.title } : {}), // LLM 生成的标题（有才存，旧文件保持无该字段）
         messages: s.messages.map(({ html, ...rest }) => rest), // html 不落盘
       }));
       fs.writeFileSync(DATA_FILE, JSON.stringify(slim)); // 紧凑存储，不带缩进
@@ -171,16 +173,25 @@ function dropOldestDoc(id) {
   if (token) delete session.docs[token];
 }
 
-/** 会话列表（按最近活跃倒序），供会话管理面板使用 */
+/** 设置会话标题（LLM 生成的短标题；变更即落盘） */
+function setTitle(id, title) {
+  const session = sessions.get(id);
+  if (!session || !title) return;
+  session.title = String(title).slice(0, 40);
+  touch(session);
+  persist();
+}
+
+/** 会话列表（按最近活跃倒序），供会话管理面板使用；标题优先用 LLM 生成的，否则截断首条消息 */
 function listSessions() {
   return [...sessions.values()]
     .sort((a, b) => lastActive(b) - lastActive(a))
     .map((s) => {
       const firstUser = s.messages.find((m) => m.role === "user");
-      const title = firstUser ? String(firstUser.content).replace(/\s+/g, " ").trim().slice(0, 48) : "（空会话）";
+      const fallback = firstUser ? String(firstUser.content).replace(/\s+/g, " ").trim().slice(0, 48) : "（空会话）";
       return {
         id: s.id,
-        title: title || "（空会话）",
+        title: s.title || fallback || "（空会话）",
         updatedAt: s.updatedAt || s.createdAt,
         messageCount: s.messages.length,
       };
@@ -192,4 +203,4 @@ function remove(id) {
   if (sessions.delete(id)) persist();
 }
 
-module.exports = { getOrCreate, get, clear, appendMessages, cacheDoc, dropOldestDoc, listSessions, remove };
+module.exports = { getOrCreate, get, clear, appendMessages, cacheDoc, dropOldestDoc, setTitle, listSessions, remove };
