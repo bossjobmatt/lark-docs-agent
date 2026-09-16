@@ -4,7 +4,7 @@ const fs = require("fs");
 
 /**
  * lark CLI 的纯调用方约定：
- * - LARK_CLI 环境变量显式指向 CLI（真实或内置演示 mock bin/lark），优先级最高；
+ * - LARK_CLI 环境变量显式指向 CLI（真实或演示 mock fixtures/lark-demo/lark），优先级最高；
  * - 否则探测 PATH 中的 lark，且要求 `lark auth status` 返回 code 0（已认证）；
  * - 都没有 → 不回落任何内置实现，工具调用返回友好提示，由用户自行安装。
  * 本项目只调用 CLI，不做其安装与凭据配置。

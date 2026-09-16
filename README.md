@@ -4,7 +4,23 @@
 
 > 本项目是 lark CLI 的**纯调用方**：优先使用 `LARK_CLI` 环境变量指定的 CLI，否则探测 PATH 中已认证的 `lark`（`lark auth status` 返回成功即视为可用）；
 > 两者都未检测到时不回落任何内置实现——文档相关调用会返回友好提示，引导用户自行安装并认证。本项目不负责 lark CLI 的安装与凭据配置。
-> 仓库内置 `bin/lark` **模拟版 CLI**（配合 `mock-data/` 三篇文档）仅供演示与测试，需显式启用：`LARK_CLI=./bin/lark npm start`。
+> 仓库内置**模拟版 CLI**（`fixtures/lark-demo/`，配合三篇演示文档）仅供演示与测试，需显式启用：`npm run demo`。
+
+## 职责边界
+
+本项目只做三件事（调用方职责）：
+
+1. **解析**：启动时确定用哪个 CLI——`LARK_CLI` 环境变量显式指定，否则探测 PATH 中通过 `lark auth status` 认证检查的 `lark`；
+2. **调用**：按约定（JSON 信封 `{ code, msg, data }` + `auth status` / `doc list` / `doc get <url|token>` / `doc search <keyword>` 子命令）spawn 子进程执行，超时与异常兜底；
+3. **呈现**：把调用结果以工具徽标、流式回答呈现；检测不到 CLI 时只透出引导提示（`health.lark.available=false`、徽标与欢迎页说明），聊天与流式输出不受影响。
+
+明确不做：
+
+- ❌ lark CLI 的安装、认证、凭据管理——没有 App ID / Secret 的任何配置入口
+- ❌ lark CLI 的实现或内置默认——模拟 CLI 仅作为测试资产放在 `fixtures/lark-demo/`，`npm run demo` 才启用
+- ❌ 任何「配置 lark CLI 服务」的界面或代码路径
+
+也就是说：**lark CLI 从哪来（官方 / 自建 / 第三方）、怎么认证，完全是使用者自己的事**。只要它符合信封约定并放对位置（`LARK_CLI` 或 PATH），本项目零改动接入——该行为已由 `test/no-cli.test.js` 与 HTTP e2e 用例双向锁定。
 
 支持两种 **Agent 模式**（界面「⚙️ 配置 LLM」中切换，保存即生效）：
 
@@ -29,7 +45,7 @@ pi Agent 模式要点：
 
 | 环节 | 现状（模拟） | 换真实 Lark CLI 的要点 |
 | --- | --- | --- |
-| 文档读取 | `bin/lark doc get` 读本地 mock 文件 | 官方没有现成的 `lark` 文档 CLI，通常需自建：封装飞书开放平台 OpenAPI（`docx/v1/documents/{id}/raw_content` 或 blocks 接口），用 App ID/Secret 换 tenant/user access token |
+| 文档读取 | `fixtures/lark-demo/lark doc get` 读本地演示文档 | 官方没有现成的 `lark` 文档 CLI，通常需自建：封装飞书开放平台 OpenAPI（`docx/v1/documents/{id}/raw_content` 或 blocks 接口），用 App ID/Secret 换 tenant/user access token |
 | 文档格式 | mock 文档即 Markdown | **最大坑点**：飞书 docx 是块（block）结构，API 返回 blocks，需要自己写 block → Markdown 转换器（表格/画板/附件等块较繁琐）；`raw_content` 接口只给纯文本 |
 | 权限 | 无鉴权 | 应用需开通 `docx:document:readonly` 等权限并发布；用户/租户必须对文档有阅读权限，否则报 230002/99991672，需在回复中友好提示 |
 | 限流与稳定 | 模拟延迟 150-400ms | OpenAPI 有频控（按应用/按用户），需做重试与退避；CLI 超时兜底本 demo 已实现 |
@@ -48,7 +64,7 @@ npm test           # 运行测试套件（node --test，含 HTTP e2e 与 mock �
 ```
 
 - 首次启动（未检测到 lark CLI、未配置 LLM Key）：徽标与欢迎页会提示「未检测到 lark CLI」，示例文档列表为空；带文档链接提问时，回答中会说明需要本地安装并认证 lark CLI。聊天与流式输出不受影响。
-- 演示模式（无真实 CLI 体验全链路）：`LARK_CLI=./bin/lark npm start`，使用内置模拟 CLI 与 `mock-data/` 文档。
+- 演示模式（无真实 CLI 体验全链路）：`npm run demo`，使用 `fixtures/lark-demo/` 的模拟 CLI 与演示文档。
 - 默认绑定 `127.0.0.1:3737`，可用 `HOST` / `PORT` 环境变量覆盖（如 `PORT=8080 npm start`）。
 
 ### 点击配置 LLM（界面内，保存即生效）
@@ -70,7 +86,7 @@ npm test           # 运行测试套件（node --test，含 HTTP e2e 与 mock �
 ## 演示用模拟 CLI（内置，需显式启用）
 
 ```bash
-LARK_CLI=./bin/lark npm start   # 服务以内置模拟 CLI 运行
+npm run demo                    # 服务以内置模拟 CLI 运行（LARK_CLI=./fixtures/lark-demo/lark）
 npm run lark -- auth status                     # 认证状态
 npm run lark -- doc list                        # 列出可访问文档
 npm run lark -- doc get https://demo.feishu.cn/docx/doccnABC123xyz
@@ -78,14 +94,14 @@ npm run lark -- doc get doccnFAQ789rst          # 裸 token 也可以
 npm run lark -- doc search 上线                 # 关键词搜索
 ```
 
-输出为统一 JSON 信封 `{ code, msg, data }`（`code === 0` 成功，与飞书 OpenAPI 风格一致，非 0 时进程退出码为 1）。模拟文档共 3 篇，位于 `mock-data/docs/`。支持失败注入：`LARK_FAIL_RATE=0.5`（doc get 50% 概率失败）用于演示降级链路。
+输出为统一 JSON 信封 `{ code, msg, data }`（`code === 0` 成功，与飞书 OpenAPI 风格一致，非 0 时进程退出码为 1）。演示文档共 3 篇，位于 `fixtures/lark-demo/mock-data/docs/`。支持失败注入：`LARK_FAIL_RATE=0.5`（doc get 50% 概率失败）用于演示降级链路。
 
 ## 架构
 
 ```
-浏览器 (public/)                     本地服务 (src/)                    模拟 CLI
+浏览器 (public/)                     本地服务 (src/)                  lark CLI（外部）
 ┌──────────────────┐   POST /api/chat  ┌────────────────────┐   spawn   ┌─────────────┐
-│ 输入框 + 多轮消息  │ ────────────────▶ │ server.js 路由      │ ────────▶ │ bin/lark     │
+│ 输入框 + 多轮消息  │ ────────────────▶ │ server.js 路由      │ ────────▶ │ lark CLI*    │
 │ Markdown 渲染     │ ◀──────────────── │ agent.js 编排：     │ ◀──────── │ doc get/list │
 │ 工具调用徽标      │   HTML + 历史      │  ① 提取文档链接/token│  JSON信封  │ search/auth  │
 └──────────────────┘                    │  ② 调 lark CLI 读文档│           └─────────────┘

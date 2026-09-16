@@ -2,7 +2,7 @@
  * pi Agent 模式：通过 @earendil-works/pi-coding-agent SDK 编程式接入。
  *
  * 职责划分与「内置编排」不同：这里不在服务端预取文档，而是把规则写进 system prompt，
- * 由 pi 驱动的模型自主决定何时调用工具；工具内部执行本地 Lark CLI（bin/lark）。
+ * 由 pi 驱动的模型自主决定何时调用工具；工具内部执行本地已认证的 lark CLI（纯调用，不负责其安装配置）。
  * - 专用工具 lark_doc_get（defineTool 注册），不暴露 bash 等任意命令执行面
  * - 每个 UI 会话对应一个常驻 AgentSession（多轮记忆），上限 LRU 淘汰
  * - tool_execution_* 事件映射为前端工具徽标（toolCalls）

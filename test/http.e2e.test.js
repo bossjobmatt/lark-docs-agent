@@ -79,8 +79,8 @@ test.before(async () => {
       LLM_API_KEY: "sk-mock",
       LLM_BASE_URL: `http://127.0.0.1:${MOCK_PORT}/v1`,
       LLM_MODEL: "mock-model",
-      // 内置 mock 不再默认生效：e2e 显式指定其作为演示 CLI
-      LARK_CLI: path.join(ROOT, "bin", "lark"),
+      // 内置 mock 不再默认生效：e2e 显式指定其作为演示 CLI（已移入测试域）
+      LARK_CLI: path.join(ROOT, "fixtures", "lark-demo", "lark"),
     },
   });
   await waitPort(APP_PORT);
