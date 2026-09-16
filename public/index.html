@@ -37,10 +37,10 @@
       <label class="field">
         <span>Agent 模式</span>
         <select id="llm-agent-mode">
-          <option value="builtin">内置编排（服务端预取文档 → LLM/模拟回答）</option>
           <option value="pi">pi Agent（system prompt 规则，模型自主调用 lark CLI）</option>
+          <option value="builtin">内置编排（服务端预取文档 → LLM/模拟回答）</option>
         </select>
-        <span class="field-hint">pi 模式使用本机 pi CLI 的 provider 作为 LLM；下方接口类型 / Key / 模型仅内置模式使用。</span>
+        <span class="field-hint">两种模式共用下方同一套凭据；保存配置时自动写入 pi 模式的自有配置目录（data/pi-agent/）。</span>
       </label>
       <label class="field">
         <span>接口类型</span>

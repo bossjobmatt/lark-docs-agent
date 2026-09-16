@@ -9,8 +9,8 @@
 
 | 模式 | 工作方式 | LLM 来源 |
 | --- | --- | --- |
-| **内置编排**（默认） | 服务端提取文档链接 → 预取文档 → 组装上下文 → LLM/模拟规则回答 | 界面配置的 OpenAI 兼容 API（chat / responses） |
-| **pi Agent** | lark CLI 使用规则写入 system prompt，由 [pi](https://pi.dev) SDK（`@earendil-works/pi-coding-agent`，**项目内依赖**）驱动的模型**自主调用**专用工具 `lark_doc_get`（内部执行本地 lark CLI）读取文档后回答；不暴露 bash 等任意命令 | 与内置模式**同一套界面凭据**：保存配置时自动写入自有目录 `data/pi-agent/`（models.json/settings.json） |
+| **pi Agent**（默认） | lark CLI 使用规则写入 system prompt，由 [pi](https://pi.dev) SDK（`@earendil-works/pi-coding-agent`，**项目内依赖**）驱动的模型**自主调用**专用工具 `lark_doc_get`（内部执行本地 lark CLI）读取文档后回答；不暴露 bash 等任意命令 | 与内置模式**同一套界面凭据**：保存配置时自动写入自有目录 `data/pi-agent/`（models.json/settings.json） |
+| **内置编排** | 服务端提取文档链接 → 预取文档 → 组装上下文 → LLM/模拟规则回答 | 界面配置的 OpenAI 兼容 API（chat / responses） |
 
 **pi Agent 模式不依赖本地安装的 pi CLI**：SDK 来自项目 `node_modules`，凭据/模型目录由应用自己生成（`data/pi-agent/`，可用 `PI_AGENT_DIR` 覆盖）。已在「假 HOME + 无 `~/.pi` + 离线」环境下实测跑通。仅当界面未配置 Key 且本机装有已配置的 pi 时，才回退借用 `~/.pi/agent`（向后兼容）。
 
@@ -53,13 +53,15 @@ npm start          # 启动后访问 http://127.0.0.1:3737
 
 | 字段 | 说明 |
 | --- | --- |
-| Agent 模式 | `builtin`（内置编排）或 `pi`（pi Agent，模型自主调用 lark CLI） |
-| 接口类型 | `chat`（Chat Completions，`/chat/completions`）或 `responses`（Responses，`/responses`）——仅内置模式使用 |
-| Base URL | 任意 OpenAI 兼容网关，默认 `https://api.openai.com/v1`——仅内置模式使用 |
-| API Key | 保存后打码显示（`sk-****xxxx`），留空表示保持不变——仅内置模式使用 |
-| 模型 | 支持两种方式：点击 **「↻ 拉取列表」** 从网关拉取（`GET /models`）后用 **select 下拉选择**；或点击 **「✏️ 手动输入」** 自由填写任意模型名（两种模式值互相同步）——仅内置模式使用 |
+| Agent 模式 | `pi`（pi Agent，默认）或 `builtin`（内置编排）；两种模式共用下方同一套凭据 |
+| 接口类型 | `chat`（Chat Completions，`/chat/completions`）或 `responses`（Responses，`/responses`） |
+| Base URL | 任意 OpenAI 兼容网关，默认 `https://api.openai.com/v1` |
+| API Key | 保存后打码显示（`sk-****xxxx`），留空表示保持不变 |
+| 模型 | 支持两种方式：点击 **「↻ 拉取列表」** 从网关拉取（`GET /models`）后用 **select 下拉选择**；或点击 **「✏️ 手动输入」** 自由填写任意模型名（两种模式值互相同步） |
 
-支持 **「测试连接」**（用表单当前值发一条真实请求）与 **「恢复默认」**（清除配置回到模拟模式）。配置持久化在 `data/llm-config.json`（已 gitignore），无需重启服务、无需环境变量；环境变量仅作为未配置时的默认值：`LLM_API_KEY`（别名 `OPENAI_API_KEY`）、`LLM_BASE_URL`（别名 `OPENAI_BASE_URL`）、`LLM_MODEL`、`LLM_API_TYPE`、`AGENT_MODE`（`builtin` / `pi`，默认 `builtin`）。
+以上凭据为两种 Agent 模式共用：内置模式直接读取；保存配置时同时自动写入 pi 模式的自有目录 `data/pi-agent/`（models.json/settings.json）。
+
+支持 **「测试连接」**（用表单当前值发一条真实请求）与 **「恢复默认」**（清除配置回到模拟模式）。配置持久化在 `data/llm-config.json`（已 gitignore），无需重启服务、无需环境变量；环境变量仅作为未配置时的默认值：`LLM_API_KEY`（别名 `OPENAI_API_KEY`）、`LLM_BASE_URL`（别名 `OPENAI_BASE_URL`）、`LLM_MODEL`、`LLM_API_TYPE`、`AGENT_MODE`（`builtin` / `pi`，默认 `pi`）。
 
 ## 模拟 CLI 用法
 

@@ -289,7 +289,7 @@ function setLlmMsg(text, cls) {
 async function openLlmModal() {
   try {
     const c = await fetch("/api/llm/config").then((r) => r.json());
-    llmAgentMode.value = c.agentMode || "builtin";
+    llmAgentMode.value = c.agentMode || "pi";
     llmType.value = c.apiType || "chat";
     llmBase.value = c.baseUrl || "";
     llmModel.value = c.model || "";
