@@ -127,8 +127,24 @@ async function handleSend(text) {
   chatEl.appendChild(typing);
   scrollBottom(true);
 
+  // 阶段超时提示：从发送即计时（覆盖等待响应头阶段），每个阶段转换重置，2s 无新事件提示「等待模型响应…」
+  const stageHint = {
+    timer: setTimeout(() => {
+      if (typing.parentNode) typing.textContent = "等待模型响应…";
+    }, 2000),
+    rearm() {
+      clearTimeout(stageHint.timer);
+      stageHint.timer = setTimeout(() => {
+        if (typing.parentNode) typing.textContent = "等待模型响应…";
+      }, 2000);
+    },
+    clear() {
+      clearTimeout(stageHint.timer);
+    },
+  };
+
   try {
-    await sendStreaming(text, typing);
+    await sendStreaming(text, typing, stageHint);
   } catch (e) {
     typing.remove();
     const errWrap = el("div", "msg assistant");
@@ -144,6 +160,7 @@ async function handleSend(text) {
     chatEl.appendChild(errWrap);
     scrollBottom(true);
   } finally {
+    stageHint.clear();
     setBusy(false);
     input.focus();
   }
@@ -155,7 +172,7 @@ async function handleSend(text) {
  * 流式期间用前端 marked 增量渲染（节流 ~90ms），done 后整体替换为服务端渲染的完整卡片；
  * 点击「⏹ 停止」中止生成——已生成的部分仅保留在当前页面（服务端不持久化半截回复）。
  */
-function sendStreaming(text, typing) {
+function sendStreaming(text, typing, stageHint) {
   streamAbort = new AbortController();
   let userAborted = false;
   streamAbort.signal.addEventListener("abort", () => (userAborted = true), { once: true });
@@ -183,6 +200,7 @@ function sendStreaming(text, typing) {
     let errMsg = null;
     let content = "";
     let lastPaint = 0;
+
     const paint = (force) => {
       const now = Date.now();
       if (!force && now - lastPaint < 90) return; // 节流：约 90ms 渲染一次，避免每个增量都重解析
@@ -197,6 +215,7 @@ function sendStreaming(text, typing) {
         localStorage.setItem("lark-docs-session", state.sessionId);
       } else if (evt.type === "tool") {
         if (typing.parentNode) typing.textContent = "已读取文档，正在生成回复…";
+        stageHint.rearm();
         if (!toolsEl) {
           toolsEl = el("div", "toolcalls");
           wrap.insertBefore(toolsEl, bubble);
@@ -205,16 +224,19 @@ function sendStreaming(text, typing) {
         toolsEl.appendChild(toolChipsEl(evt.toolCalls || []));
         scrollBottom();
       } else if (evt.type === "delta") {
+        stageHint.clear();
         if (typing.parentNode) typing.remove();
         content += evt.text;
         paint(false);
       } else if (evt.type === "done") {
+        stageHint.clear();
         finished = true;
         if (typing.parentNode) typing.remove();
         wrap.replaceWith(renderMessage(evt.reply));
         refreshHealth();
         scrollBottom(true);
       } else if (evt.type === "error") {
+        stageHint.clear();
         if (typing.parentNode) typing.remove();
         bubble.classList.remove("streaming");
         content += (content ? "\n\n" : "") + `❌ ${evt.error}`;
@@ -246,6 +268,7 @@ function sendStreaming(text, typing) {
         }
       }
     } catch (e) {
+      stageHint.clear();
       if (!userAborted) throw e; // 用户主动停止 → 优雅收尾；其余异常向上抛
     }
     streamAbort = null;
