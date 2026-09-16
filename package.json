@@ -9,7 +9,9 @@
   },
   "scripts": {
     "start": "node src/server.js",
-    "lark": "node bin/lark"
+    "dev": "node --watch src/server.js",
+    "lark": "node bin/lark",
+    "test": "node --test"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.85.1",

@@ -42,6 +42,8 @@ pi Agent 模式要点：
 ```bash
 npm install
 npm start          # 启动后访问 http://127.0.0.1:3737
+npm run dev        # 开发模式（node --watch，改动自动重启）
+npm test           # 运行测试套件（node --test，含 HTTP e2e 与 mock 网关 fixture）
 ```
 
 - 默认运行在**模拟模式**（无 LLM Key，回复由本地规则生成，演示链路用）。
@@ -93,7 +95,9 @@ npm run lark -- doc search 上线                 # 关键词搜索
 - **protocol.js**：流式事件（`start` / `tool` / `delta` / `done` / `error`）与回复对象的唯一契约定义——agent/pi 生产、server 转发、前端消费共享同一份词汇表。
 - **会话缓存**：同一会话内同一文档只调一次 CLI（重复发送链接会显示 ⚡ 缓存命中徽标）；缓存仅存内存（每会话上限 20 篇），服务重启后同文档会重调 CLI。
 - **多轮持久化**：会话与消息落盘 `data/sessions.json`，服务重启后刷新页面不丢历史。
-- **存储瘦身与淘汰**：落盘为紧凑 JSON，只存 Markdown 原文（html 渲染结果不落盘，加载时按原文现算；docs 文档缓存不落盘）；会话自动淘汰——默认 7 天不活跃（`SESSION_TTL_DAYS`）或总数超过 100 个（`SESSION_MAX_COUNT`）即删，每会话仅保留最近 50 条消息（`SESSION_MAX_MESSAGES`）。
+- **存储瘦身与淘汰**：落盘为紧凑 JSON，只存 Markdown 原文（html 渲染结果不落盘，加载时按原文现算；docs 文档缓存不落盘）；会话自动淘汰——默认 7 天不活跃（`SESSION_TTL_DAYS`，显式 0 生效）或总数超过 100 个（`SESSION_MAX_COUNT`）即删，每会话仅保留最近 50 条消息（`SESSION_MAX_MESSAGES`）。
+- **上下文预算与选段**：LLM 输入按字符预算控制（默认 24000，`CONTEXT_BUDGET_CHARS` 可调）；超过 8000 字（`DOC_FULL_TEXT_MAX` 可调）的文档不再整篇进上下文，改为按问题相关度节选 top-k 章节 + 全文大纲；超限类失败先裁剪最早缓存文档自愈重试一次，仍失败才降级模拟。
+- **会话管理**：页头「🗂 会话」面板列出全部历史会话（按最近活跃排序），支持切换、新建、删除；匿名新对话自动创建新会话。
 - **Markdown 渲染**：服务端用 `marked` 转 HTML 并做轻量消毒（去 `<script>`/`<iframe>`/内联事件），前端零依赖。
 
 ## API 一览
@@ -103,16 +107,18 @@ npm run lark -- doc search 上线                 # 关键词搜索
 | GET | `/api/health` | 健康检查与模式探测（sim / llm，含当前模型与接口类型） |
 | GET | `/api/examples` | 示例文档列表（真实经 CLI `doc list` 取得） |
 | GET | `/api/history?sessionId=` | 取会话历史 |
-| POST | `/api/chat` | `{ sessionId?, message }` → 回复 + 完整历史 |
+| POST | `/api/chat` | `{ sessionId?, message }` → 瘦身响应：`{ sessionId, mode, message }`（前端本地维护列表，不再回传全量 history） |
 | POST | `/api/chat/stream` | 流式对话：NDJSON 事件行（`start` / `tool` / `delta` / `done` / `error`），`done` 携带完整回复（含渲染 HTML） |
+| GET | `/api/sessions` | 会话列表（按最近活跃倒序，含标题/条数，供会话管理面板） |
 | POST | `/api/session/clear` | 清空会话 |
+| POST | `/api/session/delete` | 删除会话（同时销毁 pi Agent 会话记忆） |
 | GET | `/api/llm/config` | 读 LLM 配置（API Key 打码） |
 | POST | `/api/llm/config` | 保存 LLM 配置，保存即生效 |
 | POST | `/api/llm/config/reset` | 清除配置，回落环境变量/默认值 |
 | POST | `/api/llm/test` | 用传入（或已存）配置发真实请求，测试连通性 |
 | POST | `/api/llm/models` | 拉取 OpenAI 兼容模型列表（`GET {baseUrl}/models`） |
 
-替换为真实 Lark CLI（可选）：`LARK_CLI=/path/to/real-lark npm start`。
+替换为真实 Lark CLI（可选）：`LARK_CLI=/path/to/real-lark npm start`。模拟 CLI 支持失败注入：`LARK_FAIL_RATE=0.5`（doc get 50% 概率失败）用于演示降级链路。
 
 ## 已验证的端到端场景
 
@@ -125,7 +131,8 @@ npm run lark -- doc search 上线                 # 关键词搜索
 7. **pi Agent 模式**：system prompt 规则驱动，模型自主调用 `lark_doc_get` 读取文档并回答；同会话追问无需重复发链接（会话记忆）；SDK 缺失时自动降级为内置编排并在回复中提示；
 8. **无 pi 安装环境**：以假 HOME（无 `~/.pi`）+ 离线模式启动服务，仅凭界面配置的凭据跑通 pi 模式全流程（首问调工具、追问靠会话记忆、UI 徽标正常），证明 pi 模式零依赖本地安装的 pi；
 9. **回答卡片操作**：每条回答下方提供「⧉ 复制」（复制 Markdown 原文到剪贴板，带 ✓ 反馈）与「Raw / 渲染」切换（Markdown 源码视图与渲染视图互切）；
-10. **流式输出**：`/api/chat/stream` 逐段推送——内置 LLM 模式解析 `chat` 与 `responses` 两种 SSE 增量，pi 模式转发 SDK `text_delta` 事件，模拟模式假流式；前端打字机展示原文、工具徽标先行展示，`done` 后整体替换为渲染卡片。
+10. **流式输出**：`/api/chat/stream` 逐段推送——内置 LLM 模式解析 `chat` 与 `responses` 两种 SSE 增量，pi 模式转发 SDK `text_delta` 事件，模拟模式假流式；前端打字机展示原文、工具徽标先行展示，`done` 后整体替换为渲染卡片；
+11. **会话管理**：「🗂 会话」面板切换/新建/删除历史会话，切换即恢复该会话完整历史（含渲染 Markdown）。
 
 ## 依赖说明
 
@@ -135,4 +142,4 @@ npm run lark -- doc search 上线                 # 关键词搜索
 ## 局限（演示定位）
 
 - 模拟模式的回答是关键词规则匹配，仅证明链路，不等于 AI 效果；接入 LLM Key 后即为真实问答。
-- 单机内存/文件存储，无用户体系；长文档分片（超大文档仍整篇进入上下文，超限时降级模拟）为后续增强项；流式输出已支持（NDJSON over fetch）。
+- 单机内存/文件存储，无用户体系；上下文已做字符预算与长文档选段，跨会话语义检索（RAG）为后续增强项。

@@ -122,19 +122,20 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { messages: session ? session.messages : [] });
     }
 
-    // 发送消息（核心接口）
+    // 发送消息（核心接口，响应已瘦身：前端本地维护消息列表，不再回传全量 history）
     if (req.method === "POST" && url.pathname === "/api/chat") {
       const body = JSON.parse((await readBody(req)) || "{}");
       const message = String(body.message || "").trim();
       if (!message) return send(res, 400, { error: "message 不能为空" });
 
       const session = store.getOrCreate(body.sessionId);
+      const t0 = Date.now();
       const reply = await agent.handle(message, session);
+      console.log(`[chat] sid=${session.id.slice(0, 8)} mode=${reply.mode} ${Date.now() - t0}ms`);
       return send(res, 200, {
         sessionId: session.id,
         mode: reply.mode,
         message: reply,
-        history: session.messages,
       });
     }
 
@@ -161,8 +162,10 @@ const server = http.createServer(async (req, res) => {
       const ac = new AbortController();
       res.on("close", () => ac.abort()); // 客户端断开时中止上游 LLM 请求
 
+      const t0 = Date.now();
       try {
         const reply = await agent.handle(message, session, { onEvent: writeEvent, signal: ac.signal });
+        console.log(`[chat/stream] sid=${session.id.slice(0, 8)} mode=${reply.mode} ${Date.now() - t0}ms`);
         writeEvent(protocol.doneEvent(session.id, reply));
       } catch (e) {
         writeEvent(protocol.errorEvent(e.message));
@@ -170,6 +173,19 @@ const server = http.createServer(async (req, res) => {
         res.end();
       }
       return;
+    }
+
+    // 会话列表（会话管理面板）
+    if (req.method === "GET" && url.pathname === "/api/sessions") {
+      return send(res, 200, { sessions: store.listSessions() });
+    }
+
+    // 删除会话（同时销毁 pi Agent 会话记忆）
+    if (req.method === "POST" && url.pathname === "/api/session/delete") {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      store.remove(body.sessionId);
+      piAgent.dispose(body.sessionId);
+      return send(res, 200, { ok: true });
     }
 
     // 清空会话（同时销毁 pi Agent 会话记忆）

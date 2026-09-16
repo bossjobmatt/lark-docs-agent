@@ -96,6 +96,11 @@ async function main() {
     if (!token) return out({ code: 99991672, msg: "invalid argument: 缺少文档链接或 token" });
     const doc = loadDoc(token);
     if (!doc) return out({ code: 230002, msg: `document not found or no permission: ${token}` });
+    // 失败注入：LARK_FAIL_RATE=0.5 时 50% 概率返回失败，用于演示降级链路
+    const failRate = Number(process.env.LARK_FAIL_RATE) || 0;
+    if (failRate > 0 && Math.random() < failRate) {
+      return out({ code: 230002, msg: `simulated failure (LARK_FAIL_RATE=${failRate}): ${token}` });
+    }
     return out({ code: 0, msg: "success", data: doc });
   }
 

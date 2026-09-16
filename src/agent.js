@@ -72,6 +72,44 @@ function excerpt(text, max = 420) {
   return t.length > max ? t.slice(0, max) + " …（截断）" : t;
 }
 
+// LLM 上下文预算（字符数近似，防止超大文档把输入撑爆；可调）
+const CONTEXT_BUDGET_CHARS = Number(process.env.CONTEXT_BUDGET_CHARS) || 24000;
+// 超过该长度的文档不再整篇进上下文，改为按问题节选相关章节
+const DOC_FULL_TEXT_MAX = Number(process.env.DOC_FULL_TEXT_MAX) || 8000;
+
+/** 长文档按问题节选：按相关度取 top-k 章节（保持文档原顺序），并附全文大纲 */
+function docExcerpt(doc, question, budget) {
+  const ranked = splitSections(doc.content)
+    .map((s) => ({ ...s, text: s.body.join("\n") }))
+    .filter((s) => s.text.trim() && s.text.length <= budget)
+    .map((s) => ({ ...s, score: sectionScore(s, question) }))
+    .sort((a, b) => b.score - a.score);
+  const picked = [];
+  let used = 0;
+  for (const s of ranked) {
+    if (used + s.text.length > budget) break;
+    picked.push(s);
+    used += s.text.length;
+  }
+  const byIndex = new Map(splitSections(doc.content).map((s, i) => [s, i]));
+  picked.sort((a, b) => byIndex.get(a) - byIndex.get(b));
+  const body = picked.length
+    ? picked.map((s) => `## ${s.heading}\n${s.text}`).join("\n\n")
+    : "（未选出与问题直接相关的章节）";
+  return `（全文 ${doc.content.length} 字，已按问题节选相关章节）\n\n${body}\n\n**全文大纲**：${outlineOf(doc.content).join(" / ")}`;
+}
+
+/** 组装单个文档的上下文块：短文档全文，长文档按问题节选 */
+function docBlock(doc, question, budget) {
+  const head = `【文档：《${doc.title}》，更新于 ${doc.update_time}，链接 ${doc.url}】\n\n`;
+  return head + (doc.content.length <= DOC_FULL_TEXT_MAX ? doc.content : docExcerpt(doc, question, budget));
+}
+
+/** 超限类错误识别：网关对超长上下文的报错措辞各异，用关键词兜底判断 */
+function isOverflowError(e) {
+  return /context|maximum|length|token|too long|too large/i.test(e.message);
+}
+
 /** 无 LLM 时的本地模拟回复：证明「取文档→回答」链路可用 */
 function buildSimReply(question, session) {
   const docs = Object.values(session.docs);
@@ -132,14 +170,11 @@ function buildSimReply(question, session) {
   return parts.join("\n");
 }
 
-/** LLM 模式：把 CLI 拉到的文档全文 + 最近对话上下文一起交给模型；提供 onDelta 时走流式 */
+/** LLM 模式：文档（长文档按问题节选）+ 预算内的最近对话一起交给模型；提供 onDelta 时走流式 */
 async function askLlm(question, session, { onDelta, signal } = {}) {
-  const docBlocks = Object.values(session.docs)
-    .map(
-      (d) =>
-        `【文档：《${d.title}》，更新于 ${d.update_time}，链接 ${d.url}】\n\n${d.content}`
-    )
-    .join("\n\n---\n\n");
+  const docs = Object.values(session.docs);
+  const perDocBudget = Math.max(2000, Math.floor((CONTEXT_BUDGET_CHARS * 0.6) / Math.max(1, docs.length)));
+  const docBlocks = docs.map((d) => docBlock(d, question, perDocBudget)).join("\n\n---\n\n");
 
   const system = [
     "你是部署在本地服务里的 Lark 文档问答助手。",
@@ -150,15 +185,18 @@ async function askLlm(question, session, { onDelta, signal } = {}) {
     "3. 始终用中文回答。",
   ].join("\n");
 
-  const history = session.messages
+  // 总量超预算时从最旧历史开始丢（文档块优先保留），保底保留最近 2 条
+  let kept = session.messages
     .filter((m) => m.role === "user" || m.role === "assistant")
     .slice(-12)
     .map((m) => ({ role: m.role, content: m.content }));
+  const totalLen = () => system.length + docBlocks.length + kept.reduce((n, m) => n + m.content.length, 0);
+  while (kept.length > 2 && totalLen() > CONTEXT_BUDGET_CHARS) kept = kept.slice(1);
 
   const messages = [
     { role: "system", content: system },
     ...(docBlocks ? [{ role: "system", content: `以下是已读取的文档内容：\n\n${docBlocks}` }] : []),
-    ...history,
+    ...kept,
   ];
   if (onDelta) return llm.chatStream(messages, { onDelta, signal });
   return llm.chat(messages, { signal });
@@ -207,19 +245,33 @@ async function builtinCore(message, session, { onEvent, signal } = {}) {
     emitTools();
   }
 
-  // 2) 生成回复：LLM 模式，失败/未配置则降级为模拟模式（降级内容同样假流式，保持打字体验一致）
+  // 2) 生成回复：LLM 模式，超限先自愈（丢最早缓存文档重试一次），失败/未配置降级为模拟模式
   let mode = "sim";
   let content;
   if (llmConfig.isConfigured()) {
-    try {
-      content = await askLlm(message, session, {
+    const runLlm = () =>
+      askLlm(message, session, {
         onDelta: onEvent && ((text) => onEvent(deltaEvent(text))),
         signal,
       });
+    try {
+      content = await runLlm();
       mode = "llm";
     } catch (e) {
-      content = `> ⚠️ LLM 调用失败（${e.message}），已降级为本地模拟回复。\n\n` + buildSimReply(message, session);
-      if (onEvent) await fakeStream(content, onEvent);
+      if (isOverflowError(e) && Object.keys(session.docs).length) {
+        store.dropOldestDoc(session.id);
+        try {
+          content = await runLlm();
+          mode = "llm";
+          content = `> ℹ️ 上下文超限，已裁剪最早缓存的文档后重试成功。\n\n` + content;
+        } catch {
+          /* 自愈失败，走降级 */
+        }
+      }
+      if (mode !== "llm") {
+        content = `> ⚠️ LLM 调用失败（${e.message}），已降级为本地模拟回复。\n\n` + buildSimReply(message, session);
+        if (onEvent) await fakeStream(content, onEvent);
+      }
     }
   } else {
     content = buildSimReply(message, session);
@@ -256,4 +308,5 @@ async function handle(message, session, { onEvent, signal } = {}) {
   return reply;
 }
 
-module.exports = { handle };
+// 导出 handle（对外接口）+ 纯函数（内部测试接缝，供 test/ 直接验证）
+module.exports = { handle, extractTokens, splitSections, sectionScore, docExcerpt, isOverflowError };

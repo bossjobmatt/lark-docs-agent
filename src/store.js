@@ -155,4 +155,41 @@ function clear(id) {
   return session;
 }
 
-module.exports = { getOrCreate, get, clear, appendMessages, cacheDoc };
+/** 缓存会话内已拉取的文档（docs 不落盘；拉取算会话活动，刷新触活时间） */
+function cacheDoc(id, token, doc) {
+  const session = sessions.get(id);
+  if (!session || !token || !doc) return;
+  session.docs[token] = doc;
+  touch(session);
+}
+
+/** 删除最早缓存的文档（上下文超限自愈用） */
+function dropOldestDoc(id) {
+  const session = sessions.get(id);
+  if (!session) return;
+  const token = Object.keys(session.docs)[0];
+  if (token) delete session.docs[token];
+}
+
+/** 会话列表（按最近活跃倒序），供会话管理面板使用 */
+function listSessions() {
+  return [...sessions.values()]
+    .sort((a, b) => lastActive(b) - lastActive(a))
+    .map((s) => {
+      const firstUser = s.messages.find((m) => m.role === "user");
+      const title = firstUser ? String(firstUser.content).replace(/\s+/g, " ").trim().slice(0, 48) : "（空会话）";
+      return {
+        id: s.id,
+        title: title || "（空会话）",
+        updatedAt: s.updatedAt || s.createdAt,
+        messageCount: s.messages.length,
+      };
+    });
+}
+
+/** 删除整个会话（调用方负责同步销毁 pi 会话记忆） */
+function remove(id) {
+  if (sessions.delete(id)) persist();
+}
+
+module.exports = { getOrCreate, get, clear, appendMessages, cacheDoc, dropOldestDoc, listSessions, remove };
