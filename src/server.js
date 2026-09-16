@@ -56,10 +56,11 @@ function readBody(req, limit = 1024 * 1024) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   try {
-    // 静态资源
-    if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html")) return sendFile(res, "index.html");
-    if (req.method === "GET" && url.pathname === "/style.css") return sendFile(res, "style.css");
-    if (req.method === "GET" && url.pathname === "/app.js") return sendFile(res, "app.js");
+    // 静态资源（public/ 下任意文件；sendFile 内含路径穿越防护，API 路由优先于此后判断）
+    if (req.method === "GET" && !url.pathname.startsWith("/api/")) {
+      const name = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname).replace(/^\/+/, "");
+      return sendFile(res, name);
+    }
 
     // 健康检查 / 模式探测
     if (req.method === "GET" && url.pathname === "/api/health") {

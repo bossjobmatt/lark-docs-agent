@@ -12,7 +12,8 @@
 ## 硬性约束
 
 - **Node >= 18，原生 `http` 模块，零 Web 框架**。不要引入 Express/TypeScript/构建链。
-- **前端零依赖、静态文件直出**（`public/`）：不要给前端加 npm 包或打包步骤；Markdown 渲染与消毒都在服务端（`src/markdown.js`）。
+- **前端无打包步骤**（`public/` 静态直出）：唯一前端库是 vendored `public/vendor/marked.umd.js`（流式期间增量渲染用）。更新 `marked` npm 依赖时必须同步拷贝该文件（`cp node_modules/marked/lib/marked.umd.js public/vendor/`）；新增前端库同样走 vendor 拷贝，不引入打包器。前端模块用原生 ES modules（`public/js/`，`<script type="module">` 入口）。
+- **单文件 ≤300 行、职责单一**：一个文件只承担一件事（聊天 UI / 会话面板 / 配置弹窗 / 渲染辅助各自分文件）；接近上限时优先新建职责单一的模块，而不是往既有文件追加。新功能默认新建模块。
 - **运行依赖仅三个**：`marked`、`@earendil-works/pi-coding-agent`、`typebox`。新增依赖需要充分理由。
 
 ## 常用命令
@@ -38,6 +39,20 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 | `protocol.js` | 事件工厂 + `makeReply` | 流式事件与回复对象的**唯一契约** |
 | `lark.js` | `runLarkCli/cliStatus` | lark CLI 纯调用：三级解析（LARK_CLI → PATH 探测认证 → 无） |
 | `markdown.js` | `renderMarkdown` | marked + 轻量消毒（去 script/iframe/内联事件） |
+
+前端（`public/`，原生 ES modules，无打包器）：
+
+| 文件 | 职责 |
+| --- | --- |
+| `app.js` | 入口：初始化（健康检查 → 示例 → 历史恢复/欢迎页） |
+| `js/state.js` | 跨模块可变状态（sessionId/busy/lastHealth） |
+| `js/ui.js` | DOM 构建、escapeHtml、工具徽标、前端 Markdown 渲染、自动滚动管理 |
+| `js/api.js` | JSON POST 辅助 |
+| `js/health.js` | 模式徽标与健康检查 |
+| `js/chat.js` | 聊天主界面：消息渲染、流式发送（增量渲染/停止）、输入区 |
+| `js/sessions.js` | 会话面板（列表/切换/新建/删除） |
+| `js/llm-modal.js` | AI 引擎配置弹窗 |
+| `vendor/marked.umd.js` | vendored marked（更新 npm 依赖时同步拷贝） |
 
 ## 关键约定（改动前必读）
 

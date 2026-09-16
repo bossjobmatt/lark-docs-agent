@@ -421,3 +421,20 @@ button.primary:hover { background: #2b5fd9; }
   color: var(--muted);
   text-align: center;
 }
+
+/* 生成期间发送键变为停止键 */
+.composer #send.stop { background: #dc2626; }
+.composer #send.stop:hover { background: #b91c1c; }
+
+/* 请求失败的整条重试按钮 */
+.retry-chip {
+  margin-top: 6px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #fff;
+  color: var(--accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+.retry-chip:hover { border-color: var(--accent); color: var(--accent); }

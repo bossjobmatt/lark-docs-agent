@@ -7,6 +7,7 @@
  */
 const http = require("http");
 const PORT = Number(process.env.MOCK_PORT) || 9191;
+const PIECE_DELAY = Number(process.env.MOCK_PIECE_DELAY_MS) || 30;
 
 const TEXT_PIECES = ["已读取文档《上线方案》。", "**里程碑**：阶段一已完成，", "阶段二进行中，预计下周评审。"];
 
@@ -36,7 +37,7 @@ function streamText(res, model) {
       res.write("data: [DONE]\n\n");
       res.end();
     }
-  }, 30);
+  }, PIECE_DELAY);
 }
 
 const server = http.createServer((req, res) => {
@@ -111,7 +112,7 @@ const server = http.createServer((req, res) => {
             res.write("data: [DONE]\n\n");
             res.end();
           }
-        }, 30);
+        }, PIECE_DELAY);
         return;
       }
       return streamText(res, model);
@@ -136,7 +137,7 @@ const server = http.createServer((req, res) => {
           );
           res.end();
         }
-      }, 30);
+      }, PIECE_DELAY);
       return;
     }
 
