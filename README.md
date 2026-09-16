@@ -157,7 +157,8 @@ npm run lark -- doc search 上线                 # 关键词搜索
 
 ## 依赖说明
 
-- `marked`：服务端 Markdown → HTML 渲染
+- Node ≥ 20.19：`marked` v16 起仅提供 ESM 构建，服务端 `require("marked")` 依赖 Node 的 require(esm) 支持（20.19 起默认开启）
+- `marked`（v18）：服务端 Markdown → HTML 渲染
 - `@earendil-works/pi-coding-agent` + `typebox`：pi Agent 模式的 SDK 与工具参数 schema（项目内依赖，随 `npm install` 安装，无需全局安装 pi CLI；未安装时内置编排不受影响）
 
 ## 局限（演示定位）

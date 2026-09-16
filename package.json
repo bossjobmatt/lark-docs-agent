@@ -5,7 +5,7 @@
   "description": "本地服务：AI Agent 通过（模拟）Lark CLI 读取飞书/Lark 文档，支持多轮对话与 Markdown 渲染",
   "main": "src/server.js",
   "engines": {
-    "node": ">=18"
+    "node": ">=20.19.0"
   },
   "scripts": {
     "start": "node src/server.js",
@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.85.1",
-    "marked": "^12.0.0",
+    "marked": "^18.0.13",
     "typebox": "^1.3.7"
   }
 }

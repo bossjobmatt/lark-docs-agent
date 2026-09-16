@@ -11,6 +11,7 @@
 
 ### 变更
 
+- **marked 升级 12.0.2 → 18.0.13**：v13–v18 的破坏性变更均不触及本项目使用的 `marked.parse()` + `gfm`/`breaks` API 面（22 项渲染语料对比仅 1 项良性差异）；vendored UMD 随 npm 依赖同步（v16 起为压缩版，45.8 KB ← 100.5 KB）。**Node 下限由 18 升至 20.19**（marked v16+ 仅提供 ESM 构建，服务端 `require("marked")` 依赖 require(esm)），`engines`、`AGENTS.md`、README 同步更新。
 - **体验优化**：生成期间发送键变「⏹ 停止」（经 AbortController 中止，服务端同步中止上游请求）；流式期间用 vendored marked 增量渲染（节流 ~90ms + 轻量消毒），done 后仍替换为服务端权威渲染；自动滚动节流（用户上翻暂停跟随）；typing 指示随事件阶段更新且 2s 无进展提示「等待模型响应…」（计时覆盖等待响应头阶段）；失败气泡带「↻ 重试」；删除会话二次确认；等待期间输入框保持可编辑。
 - **徽标拆分**：单一徽标拆为三个独立 chip——Agent/LLM 模式、lark CLI 状态（未检测到时显示）、pi SDK 降级（异常时显示），按需显示不再互相挤占。
 - **前端模块化**：`app.js` 拆分为原生 ES modules（`state` / `ui` / `api` / `health` / `chat` / `sessions` / `llm-modal`），无打包器；新增硬性约束「单文件 ≤300 行、职责单一」（见 `AGENTS.md`）。

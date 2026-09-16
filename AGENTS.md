@@ -11,7 +11,7 @@
 
 ## 硬性约束
 
-- **Node >= 18，原生 `http` 模块，零 Web 框架**。不要引入 Express/TypeScript/构建链。
+- **Node >= 20.19（marked v16+ 仅提供 ESM 构建，`require("marked")` 依赖 require(esm)），原生 `http` 模块，零 Web 框架**。不要引入 Express/TypeScript/构建链。
 - **前端无打包步骤**（`public/` 静态直出）：唯一前端库是 vendored `public/vendor/marked.umd.js`（流式期间增量渲染用）。更新 `marked` npm 依赖时必须同步拷贝该文件（`cp node_modules/marked/lib/marked.umd.js public/vendor/`）；新增前端库同样走 vendor 拷贝，不引入打包器。前端模块用原生 ES modules（`public/js/`，`<script type="module">` 入口）。
 - **单文件 ≤300 行、职责单一**：一个文件只承担一件事（聊天 UI / 会话面板 / 配置弹窗 / 渲染辅助各自分文件）；接近上限时优先新建职责单一的模块，而不是往既有文件追加。新功能默认新建模块。
 - **运行依赖仅三个**：`marked`、`@earendil-works/pi-coding-agent`、`typebox`。新增依赖需要充分理由。
