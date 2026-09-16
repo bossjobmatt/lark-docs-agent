@@ -315,9 +315,7 @@ function llmFormPayload() {
 
 llmBtn.addEventListener("click", openLlmModal);
 document.getElementById("llm-cancel").addEventListener("click", closeLlmModal);
-llmModal.addEventListener("click", (e) => {
-  if (e.target === llmModal) closeLlmModal();
-});
+// 注意：点击遮罩区域不关闭弹窗，避免误触丢失已填写的配置；仅「取消」按钮或 Esc 关闭
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && !llmModal.classList.contains("hidden")) closeLlmModal();
 });
