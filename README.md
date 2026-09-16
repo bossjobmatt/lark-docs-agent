@@ -66,6 +66,7 @@ npm test           # 运行测试套件（node --test，含 HTTP e2e 与 mock �
 - 首次启动（未检测到 lark CLI、未配置 LLM Key）：徽标与欢迎页会提示「未检测到 lark CLI」，示例文档列表为空；带文档链接提问时，回答中会说明需要本地安装并认证 lark CLI。聊天与流式输出不受影响。
 - 演示模式（无真实 CLI 体验全链路）：`npm run demo`，使用 `fixtures/lark-demo/` 的模拟 CLI 与演示文档。
 - 默认绑定 `127.0.0.1:3737`，可用 `HOST` / `PORT` 环境变量覆盖（如 `PORT=8080 npm start`）。
+- AI 编码代理（或新接手者）的工作约定见 [AGENTS.md](AGENTS.md)：架构地图、模块纪律（store 变更所有权、protocol.js 事件契约、lark 信封约定）、测试与提交规范、环境变量速查。
 
 ### 点击配置 LLM（界面内，保存即生效）
 
