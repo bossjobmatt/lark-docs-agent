@@ -2,7 +2,8 @@
 import { el, escapeHtml } from "./ui.js";
 import { state } from "./state.js";
 import { post } from "./api.js";
-import { refresh, showWelcome, abortStream } from "./chat.js";
+import { refresh, showWelcome } from "./chat.js";
+import { abortStream } from "./stream.js";
 import { refreshHealth } from "./health.js";
 
 const sessionsBtn = document.getElementById("sessions-btn");

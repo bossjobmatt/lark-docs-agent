@@ -1,16 +1,14 @@
-/** 聊天主界面：消息渲染、流式发送（增量渲染/停止）、输入区与清空 */
-import { el, escapeHtml, toolChipsEl, frontendMarkdown, scrollBottom } from "./ui.js";
+/** 聊天主界面：消息流管理、发送入口（流式实现在 stream.js）、输入区与清空 */
+import { el, escapeHtml, renderMessage, scrollBottom } from "./ui.js";
 import { state } from "./state.js";
 import { post } from "./api.js";
-import { refreshHealth } from "./health.js";
+import { sendStreaming, abortStream } from "./stream.js";
 
 const chatEl = document.getElementById("chat");
 const form = document.getElementById("composer");
 const input = document.getElementById("input");
 const sendBtn = document.getElementById("send");
 const clearBtn = document.getElementById("clear-btn");
-
-let streamAbort = null;
 
 function setBusy(v) {
   state.busy = v;
@@ -19,74 +17,7 @@ function setBusy(v) {
   sendBtn.classList.toggle("stop", v);
 }
 
-export function abortStream() {
-  if (streamAbort) streamAbort.abort();
-}
-
-function renderMessage(m) {
-  const wrap = el("div", `msg ${m.role}`);
-
-  if (m.toolCalls && m.toolCalls.length) {
-    wrap.appendChild(toolChipsEl(m.toolCalls));
-  }
-
-  const bubble = el("div", "bubble");
-  if (m.role === "assistant") {
-    bubble.innerHTML = m.html || escapeHtml(m.content || "");
-  } else {
-    bubble.textContent = m.content;
-  }
-
-  if (m.role === "assistant" && m.content) {
-    // 回答卡片：气泡 + 底部操作条（复制 Markdown 原文 / Raw 与渲染切换）
-    const holder = el("div", "bubble-block");
-    holder.appendChild(bubble);
-
-    const actions = el("div", "bubble-actions");
-
-    const copyBtn = el("button", "mini-action");
-    copyBtn.type = "button";
-    copyBtn.title = "复制 Markdown 原文";
-    copyBtn.textContent = "⧉ 复制";
-    copyBtn.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(m.content);
-        copyBtn.textContent = "✓ 已复制";
-      } catch {
-        copyBtn.textContent = "复制失败";
-      }
-      setTimeout(() => (copyBtn.textContent = "⧉ 复制"), 1500);
-    });
-    actions.appendChild(copyBtn);
-
-    const rawBtn = el("button", "mini-action");
-    rawBtn.type = "button";
-    rawBtn.title = "在 Markdown 源码与渲染视图间切换";
-    rawBtn.textContent = "Raw";
-    let showRaw = false;
-    rawBtn.addEventListener("click", () => {
-      showRaw = !showRaw;
-      bubble.innerHTML = showRaw
-        ? `<pre class="raw-md">${escapeHtml(m.content)}</pre>`
-        : m.html || escapeHtml(m.content);
-      rawBtn.textContent = showRaw ? "渲染" : "Raw";
-      rawBtn.classList.toggle("active", showRaw);
-    });
-    actions.appendChild(rawBtn);
-
-    holder.appendChild(actions);
-    wrap.appendChild(holder);
-  } else {
-    wrap.appendChild(bubble);
-  }
-
-  if (m.ts) {
-    const ts = el("span", "ts");
-    ts.textContent = m.ts;
-    wrap.appendChild(ts);
-  }
-  return wrap;
-}
+export { abortStream };
 
 export function refresh(history) {
   chatEl.innerHTML = "";
@@ -127,16 +58,18 @@ async function handleSend(text) {
   chatEl.appendChild(typing);
   scrollBottom(true);
 
-  // 阶段超时提示：从发送即计时（覆盖等待响应头阶段），每个阶段转换重置，2s 无新事件提示「等待模型响应…」
+  // 阶段超时提示：从发送即计时（覆盖等待响应头阶段），每个阶段转换重置，2s 无新事件提示「等待模型响应…」。
+  // 流式开始后 typing 元素不销毁（仅隐藏），流中停顿时复用同一提示。
+  const showWaitHint = () => {
+    if (!typing.parentNode) return;
+    typing.classList.remove("hidden");
+    typing.textContent = "等待模型响应…";
+  };
   const stageHint = {
-    timer: setTimeout(() => {
-      if (typing.parentNode) typing.textContent = "等待模型响应…";
-    }, 2000),
+    timer: setTimeout(showWaitHint, 2000),
     rearm() {
       clearTimeout(stageHint.timer);
-      stageHint.timer = setTimeout(() => {
-        if (typing.parentNode) typing.textContent = "等待模型响应…";
-      }, 2000);
+      stageHint.timer = setTimeout(showWaitHint, 2000);
     },
     clear() {
       clearTimeout(stageHint.timer);
@@ -164,128 +97,6 @@ async function handleSend(text) {
     setBusy(false);
     input.focus();
   }
-}
-
-/**
- * 流式发送：POST /api/chat/stream，按行读 NDJSON 事件。
- * 事件契约定义见 src/protocol.js（start / tool / delta / done / error）。
- * 流式期间用前端 marked 增量渲染（节流 ~90ms），done 后整体替换为服务端渲染的完整卡片；
- * 点击「⏹ 停止」中止生成——已生成的部分仅保留在当前页面（服务端不持久化半截回复）。
- */
-function sendStreaming(text, typing, stageHint) {
-  streamAbort = new AbortController();
-  let userAborted = false;
-  streamAbort.signal.addEventListener("abort", () => (userAborted = true), { once: true });
-
-  const run = async () => {
-    const resp = await fetch("/api/chat/stream", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId: state.sessionId, message: text }),
-      signal: streamAbort.signal,
-    });
-    if (!resp.ok || !(resp.headers.get("content-type") || "").includes("ndjson")) {
-      const err = await resp.json().catch(() => ({}));
-      throw new Error(err.error || `HTTP ${resp.status}`);
-    }
-
-    const wrap = el("div", "msg assistant");
-    const bubble = el("div", "bubble streaming");
-    wrap.appendChild(bubble);
-    chatEl.appendChild(wrap);
-    scrollBottom();
-
-    let toolsEl = null;
-    let finished = false;
-    let errMsg = null;
-    let content = "";
-    let lastPaint = 0;
-
-    const paint = (force) => {
-      const now = Date.now();
-      if (!force && now - lastPaint < 90) return; // 节流：约 90ms 渲染一次，避免每个增量都重解析
-      lastPaint = now;
-      bubble.innerHTML = frontendMarkdown(content) || escapeHtml(content);
-      scrollBottom();
-    };
-
-    const onEvent = (evt) => {
-      if (evt.type === "start") {
-        state.sessionId = evt.sessionId;
-        localStorage.setItem("lark-docs-session", state.sessionId);
-      } else if (evt.type === "tool") {
-        if (typing.parentNode) typing.textContent = "已读取文档，正在生成回复…";
-        stageHint.rearm();
-        if (!toolsEl) {
-          toolsEl = el("div", "toolcalls");
-          wrap.insertBefore(toolsEl, bubble);
-        }
-        toolsEl.innerHTML = "";
-        toolsEl.appendChild(toolChipsEl(evt.toolCalls || []));
-        scrollBottom();
-      } else if (evt.type === "delta") {
-        stageHint.clear();
-        if (typing.parentNode) typing.remove();
-        content += evt.text;
-        paint(false);
-      } else if (evt.type === "done") {
-        stageHint.clear();
-        finished = true;
-        if (typing.parentNode) typing.remove();
-        wrap.replaceWith(renderMessage(evt.reply));
-        refreshHealth();
-        scrollBottom(true);
-      } else if (evt.type === "error") {
-        stageHint.clear();
-        if (typing.parentNode) typing.remove();
-        bubble.classList.remove("streaming");
-        content += (content ? "\n\n" : "") + `❌ ${evt.error}`;
-        errMsg = evt.error;
-        paint(true);
-      }
-    };
-
-    try {
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        let idx;
-        while ((idx = buf.indexOf("\n")) >= 0) {
-          const line = buf.slice(0, idx).trim();
-          buf = buf.slice(idx + 1);
-          if (!line) continue;
-          let evt;
-          try {
-            evt = JSON.parse(line);
-          } catch {
-            continue;
-          }
-          onEvent(evt);
-        }
-      }
-    } catch (e) {
-      stageHint.clear();
-      if (!userAborted) throw e; // 用户主动停止 → 优雅收尾；其余异常向上抛
-    }
-    streamAbort = null;
-
-    if (!finished && !errMsg && !userAborted) throw new Error("流式连接提前结束");
-    if (userAborted) {
-      if (typing.parentNode) typing.remove();
-      bubble.classList.remove("streaming");
-      content += content ? "\n\n> ⏹ 已停止生成" : "⏹ 已停止生成";
-      paint(true);
-    }
-  };
-
-  return run().catch((e) => {
-    streamAbort = null;
-    throw e;
-  });
 }
 
 // ---------- 输入区事件 ----------

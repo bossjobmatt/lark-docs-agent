@@ -32,6 +32,8 @@ const input = document.getElementById("input");
     document.getElementById("tips").classList.add("hidden");
   }
 
+  // 流式进行中不做任何初始化渲染：晚到的 refresh 或欢迎页都会破坏正在生成的消息流
+  if (state.busy) return;
   if (state.sessionId) {
     try {
       const { messages } = await fetch(`/api/history?sessionId=${encodeURIComponent(state.sessionId)}`).then((r) => r.json());

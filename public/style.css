@@ -146,6 +146,7 @@ pre.raw-md {
 .tool.error { border-left-color: #ef4444; color: #b91c1c; }
 
 .typing { color: var(--muted); font-size: 13px; padding: 6px 2px; }
+.typing.hidden { display: none; } /* 流式开始后隐藏，流中停顿时复用为「等待模型响应…」 */
 .typing::after { content: "…"; animation: dots 1.2s steps(3) infinite; }
 @keyframes dots { 0% { content: ""; } 50% { content: "…"; } }
 

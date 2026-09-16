@@ -46,10 +46,11 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 | --- | --- |
 | `app.js` | 入口：初始化（健康检查 → 示例 → 历史恢复/欢迎页） |
 | `js/state.js` | 跨模块可变状态（sessionId/busy/lastHealth） |
-| `js/ui.js` | DOM 构建、escapeHtml、工具徽标、前端 Markdown 渲染、自动滚动管理 |
+| `js/ui.js` | DOM 构建、escapeHtml、消息卡片、工具徽标、前端 Markdown 渲染（含流式增量切分）、自动滚动管理 |
 | `js/api.js` | JSON POST 辅助 |
 | `js/health.js` | 模式徽标与健康检查 |
-| `js/chat.js` | 聊天主界面：消息渲染、流式发送（增量渲染/停止）、输入区 |
+| `js/chat.js` | 聊天主界面：消息流管理、发送入口、输入区与清空 |
+| `js/stream.js` | 流式发送：NDJSON 事件解析、流式增量渲染（稳定前缀+活跃尾行）、生成中止 |
 | `js/sessions.js` | 会话面板（列表/切换/新建/删除） |
 | `js/llm-modal.js` | AI 引擎配置弹窗 |
 | `vendor/marked.umd.js` | vendored marked（更新 npm 依赖时同步拷贝） |
