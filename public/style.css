@@ -98,7 +98,7 @@ body {
   border-bottom-left-radius: 4px;
 }
 
-.msg .ts { font-size: 11px; color: var(--muted); margin-top: 4px; }
+.msg .ts { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
 
 /* 回答卡片操作条：复制 / Raw 切换 */
 .bubble-block { display: flex; flex-direction: column; max-width: 78%; }

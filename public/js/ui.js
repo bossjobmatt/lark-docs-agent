@@ -26,6 +26,12 @@ export function toolChipsEl(toolCalls) {
 export function renderMessage(m) {
   const wrap = el("div", `msg ${m.role}`);
 
+  if (m.ts) {
+    const ts = el("span", "ts");
+    ts.textContent = m.ts;
+    wrap.appendChild(ts);
+  }
+
   if (m.toolCalls && m.toolCalls.length) {
     wrap.appendChild(toolChipsEl(m.toolCalls));
   }
@@ -78,12 +84,6 @@ export function renderMessage(m) {
     wrap.appendChild(holder);
   } else {
     wrap.appendChild(bubble);
-  }
-
-  if (m.ts) {
-    const ts = el("span", "ts");
-    ts.textContent = m.ts;
-    wrap.appendChild(ts);
   }
   return wrap;
 }
