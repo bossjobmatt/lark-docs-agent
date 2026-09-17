@@ -74,7 +74,7 @@ const server = http.createServer(async (req, res) => {
         apiType: cfg.apiType,
         agentMode: cfg.agentMode,
         piAvailable: cfg.agentMode === "pi" ? await piAgent.isAvailable() : null,
-        lark: { available: lark.available, source: lark.source, path: lark.path },
+        lark: { available: lark.available, source: lark.source, path: lark.path, reason: lark.reason || null },
         time: new Date().toISOString(),
       });
     }
@@ -205,6 +205,17 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// 启动日志的 Lark CLI 状态文案（四态：env 可用 / PATH 可用 / env 验证失败 / 未检测到）
+function describeLarkStatus(lark) {
+  if (lark.available) {
+    return lark.source === "env" ? `${lark.path}（LARK_CLI 指定，已通过认证检查）` : `PATH 中的 lark（已认证）`;
+  }
+  if (lark.source === "env") {
+    return `LARK_CLI 指定的 ${lark.path} 未通过认证检查（lark auth status）——修复后无需重启，检测会自动重试`;
+  }
+  return "未检测到已认证的 lark CLI —— 解析飞书文档需要本地安装并认证（LARK_CLI 或 PATH），检测失败后会自动重试";
+}
+
 server.listen(PORT, HOST, async () => {
   const cfg = llmConfig.publicConfig();
   const lark = await cliStatus();
@@ -215,13 +226,5 @@ server.listen(PORT, HOST, async () => {
   console.log(
     `LLM: ${llmConfig.isConfigured() ? `${cfg.apiType} · ${cfg.model}` : "未配置（内置模式将以模拟回复运行）"}`
   );
-  console.log(
-    `Lark CLI: ${
-      lark.available
-        ? lark.source === "env"
-          ? `${lark.path}（LARK_CLI 指定）`
-          : "PATH 中的 lark（已认证）"
-        : "未检测到已认证的 lark CLI —— 解析飞书文档需要本地安装并认证（LARK_CLI 或 PATH）"
-    }`
-  );
+  console.log(`Lark CLI: ${describeLarkStatus(lark)}`);
 });

@@ -7,6 +7,7 @@
 
 ### 修复
 
+- **lark CLI 检测加固**：`LARK_CLI` 显式指定同样须通过 `lark auth status` 认证检查（此前不验证即假报可用，错误延迟到首次调用才暴露）；探测成功判据回归信封约定 `code === 0`，不再要求演示 mock 的 `data.status` 字段；PATH 探测失败新增常见安装位置兜底（`/opt/homebrew/bin`、`/usr/local/bin`，`LARK_PATH_FALLBACKS` 可覆盖/禁用，覆盖 launchd/GUI 启动时进程 PATH 缺失场景）；探测失败改为短 TTL（新环境变量 `LARK_PROBE_RETRY_MS`，默认 30s）自动重试，装好 CLI 无需重启；stdout 信封解析容忍非 JSON 前缀（自更新提示等不再破坏解析）；PATH 探测的 node 脚本兜底仅对路径形态生效（不误执行 CWD 下同名脚本）。新增 `test/lark-probe.test.js`（4 用例，总计 26）。
 - 页面加载后立即发送消息时，晚到的会话历史恢复（`refresh`）会整建消息流、抹掉正在流式渲染的气泡（回复在后台完成但不可见）；初始化现在在流式进行中跳过历史恢复。
 
 ### 新增

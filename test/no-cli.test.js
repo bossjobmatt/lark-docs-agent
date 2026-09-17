@@ -50,8 +50,10 @@ test.before(async () => {
       PORT: String(APP_PORT),
       SESSIONS_FILE,
       LLM_CONFIG_FILE,
-      // PATH 仅含 node 所在目录与系统目录：node 可用，但不含 lark，探测必然失败
+      // PATH 仅含 node 所在目录与系统目录：node 可用，但不含 lark；
+      // 同时禁用常见位置兜底，避免宿主机装有 lark 时破坏封闭性
       PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
+      LARK_PATH_FALLBACKS: "",
       // 不设 LARK_CLI：模拟全新环境
     },
   });

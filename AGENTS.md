@@ -37,7 +37,7 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 | `llm.js` | `chat/chatStream/test/listModels` | OpenAI 兼容客户端：chat 与 responses 两种 SSE 解析共享 `buildRequest` |
 | `store.js` | `getOrCreate/appendMessages/cacheDoc/setTitle/...` | 会话存储：**拥有全部变更与持久化**；TTL/总量/截断淘汰 |
 | `protocol.js` | 事件工厂 + `makeReply` | 流式事件与回复对象的**唯一契约** |
-| `lark.js` | `runLarkCli/cliStatus` | lark CLI 纯调用：三级解析（LARK_CLI → PATH 探测认证 → 无） |
+| `lark.js` | `runLarkCli/cliStatus` | lark CLI 纯调用：三级解析（LARK_CLI → PATH 探测与常见位置兜底，均须 auth status 认证 → 无）；成功永久缓存，失败按 LARK_PROBE_RETRY_MS 短 TTL 重试 |
 | `markdown.js` | `renderMarkdown` | marked + 轻量消毒（去 script/iframe/内联事件） |
 
 前端（`public/`，原生 ES modules，无打包器）：
@@ -75,7 +75,9 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `PORT` / `HOST` | 3737 / 127.0.0.1 | 监听地址 |
-| `LARK_CLI` | 未设置 | 显式指定 lark CLI 路径；未设则探测 PATH |
+| `LARK_CLI` | 未设置 | 显式指定 lark CLI 路径（同样须通过 `lark auth status` 认证检查）；未设则探测 PATH |
+| `LARK_PROBE_RETRY_MS` | 30000 | 探测失败的缓存时长，到期自动重探（显式 0 生效 = 每次调用重探） |
+| `LARK_PATH_FALLBACKS` | `/opt/homebrew/bin/lark:/usr/local/bin/lark` | PATH 探测失败的兜底候选（冒号分隔；空串禁用） |
 | `SESSIONS_FILE` / `LLM_CONFIG_FILE` | `data/` 下 | **测试用**落盘覆盖 |
 | `SESSION_TTL_DAYS` / `SESSION_MAX_COUNT` / `SESSION_MAX_MESSAGES` | 7 / 100 / 50 | 会话淘汰（显式 0 生效） |
 | `CONTEXT_BUDGET_CHARS` / `DOC_FULL_TEXT_MAX` | 24000 / 8000 | LLM 上下文预算 |

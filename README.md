@@ -2,15 +2,15 @@
 
 本地启动一个 Web 服务：用户在输入框中粘贴 **飞书/Lark 文档链接 + 问题**，AI Agent 调用**本地 Lark CLI** 读取文档后回答，支持**流式输出**、**多轮对话**与 **Markdown 渲染**。
 
-> 本项目是 lark CLI 的**纯调用方**：优先使用 `LARK_CLI` 环境变量指定的 CLI，否则探测 PATH 中已认证的 `lark`（`lark auth status` 返回成功即视为可用）；
-> 两者都未检测到时不回落任何内置实现——文档相关调用会返回友好提示，引导用户自行安装并认证。本项目不负责 lark CLI 的安装与凭据配置。
+> 本项目是 lark CLI 的**纯调用方**：优先使用 `LARK_CLI` 环境变量指定的 CLI（同样须通过 `lark auth status` 认证检查，信封 `code === 0` 即视为可用），否则依次探测 PATH 中的 `lark` 与常见安装位置（`LARK_PATH_FALLBACKS` 可覆盖/禁用）；
+> 检测失败会按 `LARK_PROBE_RETRY_MS`（默认 30s）自动重试——装好并认证 CLI 后**无需重启**；两者都未检测到时不回落任何内置实现，文档相关调用会返回友好提示，引导用户自行安装并认证。本项目不负责 lark CLI 的安装与凭据配置。
 > 仓库内置**模拟版 CLI**（`fixtures/lark-demo/`，配合三篇演示文档）仅供演示与测试，需显式启用：`npm run demo`。
 
 ## 职责边界
 
 本项目只做三件事（调用方职责）：
 
-1. **解析**：启动时确定用哪个 CLI——`LARK_CLI` 环境变量显式指定，否则探测 PATH 中通过 `lark auth status` 认证检查的 `lark`；
+1. **解析**：确定用哪个 CLI——`LARK_CLI` 环境变量显式指定（同样须通过认证检查），否则依次探测 PATH 与常见安装位置中通过 `lark auth status` 认证检查的 `lark`；成功结果永久缓存，失败按 `LARK_PROBE_RETRY_MS`（默认 30s）短 TTL 自动重试；
 2. **调用**：按约定（JSON 信封 `{ code, msg, data }` + `auth status` / `doc list` / `doc get <url|token>` / `doc search <keyword>` 子命令）spawn 子进程执行，超时与异常兜底；
 3. **呈现**：把调用结果以工具徽标、流式回答呈现；检测不到 CLI 时只透出引导提示（`health.lark.available=false`、徽标与欢迎页说明），聊天与流式输出不受影响。
 
@@ -20,7 +20,7 @@
 - ❌ lark CLI 的实现或内置默认——模拟 CLI 仅作为测试资产放在 `fixtures/lark-demo/`，`npm run demo` 才启用
 - ❌ 任何「配置 lark CLI 服务」的界面或代码路径
 
-也就是说：**lark CLI 从哪来（官方 / 自建 / 第三方）、怎么认证，完全是使用者自己的事**。只要它符合信封约定并放对位置（`LARK_CLI` 或 PATH），本项目零改动接入——该行为已由 `test/no-cli.test.js` 与 HTTP e2e 用例双向锁定。
+也就是说：**lark CLI 从哪来（官方 / 自建 / 第三方）、怎么认证，完全是使用者自己的事**。只要它符合信封约定并放对位置（`LARK_CLI` 或 PATH），本项目零改动接入——该行为已由 `test/no-cli.test.js`、`test/lark-probe.test.js` 与 HTTP e2e 用例双向锁定。
 
 支持两种 **Agent 模式**（界面「⚙️ 配置 LLM」中切换，保存即生效）：
 
@@ -63,7 +63,7 @@ npm run dev        # 开发模式（node --watch，改动自动重启）
 npm test           # 运行测试套件（node --test，含 HTTP e2e 与 mock 网关 fixture）
 ```
 
-- 首次启动（未检测到 lark CLI、未配置 LLM Key）：徽标与欢迎页会提示「未检测到 lark CLI」，示例文档列表为空；带文档链接提问时，回答中会说明需要本地安装并认证 lark CLI。聊天与流式输出不受影响。
+- 首次启动（未检测到 lark CLI、未配置 LLM Key）：徽标与欢迎页会提示「未检测到 lark CLI」，示例文档列表为空；带文档链接提问时，回答中会说明需要本地安装并认证 lark CLI。聊天与流式输出不受影响。装好并完成认证后**无需重启**，检测会在 `LARK_PROBE_RETRY_MS`（默认 30s）内自动生效。
 - 演示模式（无真实 CLI 体验全链路）：`npm run demo`，使用 `fixtures/lark-demo/` 的模拟 CLI 与演示文档。
 - 默认绑定 `127.0.0.1:3737`，可用 `HOST` / `PORT` 环境变量覆盖（如 `PORT=8080 npm start`）。
 - AI 编码代理（或新接手者）的工作约定见 [AGENTS.md](AGENTS.md)：架构地图、模块纪律（store 变更所有权、protocol.js 事件契约、lark 信封约定）、测试与提交规范、环境变量速查。
@@ -138,7 +138,7 @@ npm run lark -- doc search 上线                 # 关键词搜索
 | POST | `/api/llm/test` | 用传入（或已存）配置发真实请求，测试连通性 |
 | POST | `/api/llm/models` | 拉取 OpenAI 兼容模型列表（`GET {baseUrl}/models`） |
 
-替换为真实 Lark CLI（可选）：`LARK_CLI=/path/to/real-lark npm start`，或确保 PATH 中的 `lark` 已认证（服务启动时自动探测）。模拟 CLI 支持失败注入：`LARK_FAIL_RATE=0.5`（doc get 50% 概率失败）用于演示降级链路。
+替换为真实 Lark CLI（可选）：`LARK_CLI=/path/to/real-lark npm start`，或确保 PATH 中的 `lark` 已认证（自动探测含 PATH 与常见安装位置，失败后按 `LARK_PROBE_RETRY_MS` 自动重试，无需重启；`LARK_PATH_FALLBACKS` 可覆盖/禁用兜底候选）。模拟 CLI 支持失败注入：`LARK_FAIL_RATE=0.5`（doc get 50% 概率失败）用于演示降级链路。
 
 ## 已验证的端到端场景
 
@@ -153,7 +153,7 @@ npm run lark -- doc search 上线                 # 关键词搜索
 9. **回答卡片操作**：每条回答下方提供「⧉ 复制」（复制 Markdown 原文到剪贴板，带 ✓ 反馈）与「Raw / 渲染」切换（Markdown 源码视图与渲染视图互切）；
 10. **流式输出**：`/api/chat/stream` 逐段推送——内置 LLM 模式解析 `chat` 与 `responses` 两种 SSE 增量，pi 模式转发 SDK `text_delta` 事件，模拟模式假流式；前端打字机展示原文、工具徽标先行展示，`done` 后整体替换为渲染卡片；
 11. **会话管理**：「🗂 会话」面板切换/新建/删除历史会话，切换即恢复该会话完整历史（含渲染 Markdown）；
-12. **无 lark CLI 环境**：未检测到已认证 CLI 时，health 报告 `lark.available=false`，徽标提示「未检测到 lark CLI」，带文档链接提问返回安装认证引导（不执行任何命令）；接入真实 CLI（`LARK_CLI` 或 PATH）后自动生效，无需改动本项目。
+12. **无 lark CLI 环境**：未检测到已认证 CLI 时，health 报告 `lark.available=false`（`lark.reason` 附最近检测失败原因），徽标提示「未检测到 lark CLI」，带文档链接提问返回安装认证引导（不执行任何命令）；接入真实 CLI（`LARK_CLI` 或 PATH）后检测自动重试生效，无需重启、无需改动本项目。
 
 ## 依赖说明
 
