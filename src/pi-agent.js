@@ -2,20 +2,18 @@
  * pi Agent 模式：通过 @earendil-works/pi-coding-agent SDK 编程式接入。
  *
  * 职责划分与「内置编排」不同：这里不在服务端预取文档，而是把规则写进 system prompt，
- * 由 pi 驱动的模型自主决定何时调用工具；工具内部执行本地已安装并登录的 lark CLI（纯调用，不负责其安装配置）。
- * - 专用工具 lark_doc_get（defineTool 注册），不暴露 bash 等任意命令执行面
+ * 由 pi 驱动的模型自主决定何时调用工具（工具定义见 pi-lark-tools.js：lark_doc_get 按信封契约
+ * 读文档，lark_cli 透传执行任意 lark CLI 子命令——命令面差异由模型自行探索适配）。
  * - 每个 UI 会话对应一个常驻 AgentSession（多轮记忆），上限 LRU 淘汰
  * - tool_execution_* 事件映射为前端工具徽标（toolCalls）
  */
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
-const { Type } = require("typebox");
 const llmConfig = require("./llm-config");
-const { runLarkCli } = require("./lark");
+const { TOOL_NAME, CLI_TOOL_NAME, makeLarkTools } = require("./pi-lark-tools");
 const { makeReply, toolEmitter, deltaEvent } = require("./protocol");
 
-const TOOL_NAME = "lark_doc_get";
 const PROMPT_TIMEOUT_MS = Number(process.env.PI_PROMPT_TIMEOUT_MS) || 120000;
 const MAX_SESSIONS = 50;
 const PROJECT_ROOT = path.join(__dirname, "..");
@@ -24,8 +22,10 @@ const OWN_AGENT_DIR = process.env.PI_AGENT_DIR || path.join(PROJECT_ROOT, "data"
 
 const SYSTEM_PROMPT = [
   "你是部署在本地服务中的 Lark 文档问答助手。",
-  "当用户消息包含飞书/Lark 文档链接（国内版 feishu.cn、国际版 larksuite.com 或 larkoffice.com，路径含 /docx/、/docs/、/wiki/）或 doccn 开头的文档 token 时，必须先调用 lark_doc_get 工具获取文档内容，再基于内容回答用户的问题。",
+  "当用户消息包含飞书/Lark 文档链接（国内版 feishu.cn、国际版 larksuite.com 或 larkoffice.com，路径含 /docx/、/docs/、/wiki/）或 doccn 开头的文档 token 时，先调用 lark_doc_get 工具获取文档内容，再基于内容回答用户的问题。",
+  "当 lark_doc_get 调用失败，或其输出表明本机 lark-cli 的命令面与之不同（例如读取文档是 docs fetch 而非 doc get）时，改用 lark_cli 工具：先探索可用命令（如 --help、auth status --json），再用实际存在的子命令获取文档，并自行解读其原始输出。",
   "如消息中出现多份文档，逐一调用工具。",
+  "lark_cli 工具仅在解析 Lark 文档所需的范围内使用（如读取、搜索、列出文档），不要执行与当前任务无关的命令。",
   "回答要求：优先依据文档内容，引用时注明章节名；文档未覆盖的内容明确说明，不要编造；工具调用失败时向用户说明原因。",
   "使用 Markdown 输出，始终用中文。",
 ].join("\n");
@@ -49,34 +49,6 @@ function loadPi() {
 /** pi 是否可用（已安装且能导入） */
 async function isAvailable() {
   return (await loadPi()) !== null;
-}
-
-function makeLarkTool() {
-  return defineTool({
-    name: TOOL_NAME,
-    label: "Lark 文档读取",
-    description:
-      "读取飞书/Lark 文档全文（Markdown）。当用户消息包含 feishu.cn（国内版）、larksuite.com 或 larkoffice.com（国际版）的文档链接，或 doccn 开头的文档 token 时，用本工具获取内容。",
-    parameters: Type.Object({
-      doc: Type.String({ description: "飞书/Lark 文档链接或文档 token，例如 https://demo.feishu.cn/docx/doccnABC123xyz" }),
-    }),
-    execute: async (_toolCallId, params) => {
-      const res = await runLarkCli(["doc", "get", params.doc]);
-      if (!res.ok) {
-        return {
-          content: [{ type: "text", text: `Lark CLI 调用失败：${res.msg}` }],
-          details: { summary: `调用失败：${res.msg}` },
-        };
-      }
-      const d = res.data;
-      return {
-        content: [
-          { type: "text", text: `【文档：《${d.title}》，更新于 ${d.update_time}，链接 ${d.url}】\n\n${d.content}` },
-        ],
-        details: { summary: `已读取《${d.title}》（${d.word_count} 字）` },
-      };
-    },
-  });
 }
 
 // defineTool 来自 pi 的 ESM 导出，这里在模块加载后填充
@@ -189,8 +161,8 @@ async function getOrCreateSession(pi, sessionId) {
     cwd: process.cwd(),
     agentDir: resolved.dir, // 凭据/模型运行时同样使用自有目录
     sessionManager: pi.SessionManager.inMemory(),
-    tools: [TOOL_NAME], // 只允许专用工具，不暴露 read/bash/edit/write
-    customTools: [makeLarkTool()],
+    tools: [TOOL_NAME, CLI_TOOL_NAME], // 只允许 lark 相关工具，不暴露 read/bash/edit/write
+    customTools: makeLarkTools(defineTool),
     resourceLoader: loader,
   });
 

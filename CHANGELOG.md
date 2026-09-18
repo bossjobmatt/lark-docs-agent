@@ -7,11 +7,13 @@
 
 ### 修复
 
+- **lark CLI 登录判据兼容真实输出**：真实 lark-cli 的 `auth status --json --verify` 顶层输出为 `{ appId, brand, identities, ... }` 且可能没有 `ok` 字段（实测），旧判据 `ok === true && verified === true` 会把已登录误判为未登录；改为 **verified 证据制**——顶层 `verified === true` 即通过（`identities` 中存在已验证身份亦可，数组/对象形态均可），显式 `ok === false` / `verified === false` 一票否决，信封 `{ code: 0 }` 等无 verified 证据的输出仍不算登录。
 - **lark CLI 检测加固**：`LARK_CLI` 显式指定同样须通过检测（此前不验证即假报可用，错误延迟到首次调用才暴露）；探测失败改为短 TTL（新环境变量 `LARK_PROBE_RETRY_MS`，默认 30s）自动重试，装好 CLI 无需重启；stdout JSON 解析容忍非 JSON 前缀（自更新提示等不再破坏解析）；node 脚本兜底仅对路径形态生效（不误执行 CWD 下同名脚本）。
 - 页面加载后立即发送消息时，晚到的会话历史恢复（`refresh`）会整建消息流、抹掉正在流式渲染的气泡（回复在后台完成但不可见）；初始化现在在流式进行中跳过历史恢复。
 
 ### 新增
 
+- **pi Agent 通用 `lark_cli` 工具 + lark CLI 透传执行**：`src/lark.js` 新增 `runLarkCommand`——不限制子命令、不解析输出，stdout/stderr/退出码原样返回（与 `runLarkCli` 共用检测门与友好提示，超时/启动失败兜底）。pi Agent 新增 `lark_cli` 工具（工具定义迁入新模块 `src/pi-lark-tools.js`，守单文件 300 行约束）：本机 lark-cli 命令面与约定不同（如读取是 `docs fetch` 而非 `doc get`）时，模型自行探索（`--help`）并调用实际存在的子命令、自行解读原始输出，无需改造 CLI；工具回传超 16000 字符截断以保护上下文。执行面不做命令面适配（不内置 `doc get` → `docs fetch` 之类的映射），命令面差异一律交由 agent 处理。
 - `AGENTS.md`：AI 编码代理工作指引（架构地图、模块纪律、测试与提交规范），README 增加引用入口。
 
 ### 变更

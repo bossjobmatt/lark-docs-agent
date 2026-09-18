@@ -1,8 +1,10 @@
 /**
  * lark CLI 两步检测行为（src/lark.js 的 probeResolve）：
  * - 第一步·安装检测：直接执行 `--version`，退出码 0 即已安装（不扫描常见安装位置）；
- * - 第二步·登录检测：直接执行 `auth status --json --verify`，stdout JSON 满足
- *   ok === true && verified === true 才算已登录——信封 { code: 0 } 或 verified:false 均不可用；
+ * - 第二步·登录检测：直接执行 `auth status --json --verify`，按 verified 证据判登录——
+ *   顶层 verified === true 即已登录（兼容真实 lark-cli 顶层 { appId, brand, identities }
+ *   无 ok 字段的输出），identities 中存在已验证身份亦可；显式 ok/verified 为 false 一票否决，
+ *   信封 { code: 0 } 等无 verified 证据的输出不算已登录；
  * - LARK_CLI 显式指定同样须通过两步检测，失败不静默当作可用；
  * - 探测失败按 LARK_PROBE_RETRY_MS 短期缓存，装好 CLI 后无需重启即可自愈；
  * - PATH 探测不落 CWD：同名 lark-cli 脚本不被误执行。
@@ -145,6 +147,66 @@ process.exit(1);`;
     assert.ok(/登录检测/.test(lark.reason));
   } finally {
     proc.kill();
+  }
+});
+
+// 真实 lark-cli 的输出形态：顶层 { appId, brand, identities, verified }，没有 ok 字段
+const realShapeCliBody = (verified) => `const args = process.argv.slice(2);
+if (args[0] === "--version") process.exit(0);
+if (args[0] === "auth" && args[1] === "status") {
+  process.stdout.write(JSON.stringify({
+    appId: "cli_real",
+    brand: "feishu",
+    identities: [
+      { type: "user", status: "ready", verified: ${verified} },
+      { type: "bot", status: "ready", verified: ${verified} },
+    ],
+    verified: ${verified},
+  }));
+  process.exit(0);
+}
+process.exit(1);`;
+
+test("真实 lark-cli 输出形态（无 ok 字段，顶层 verified）：判为已登录", async () => {
+  const cli = writeCli(path.join(TMP, "real-shape"), realShapeCliBody(true));
+  const { proc, port } = startApp({ LARK_CLI: cli });
+  try {
+    await waitPort(port);
+    const lark = await getLark(port);
+    assert.equal(lark.available, true, "真实 lark-cli 无 ok 字段的输出不应被误判为未登录");
+    assert.equal(lark.source, "env");
+  } finally {
+    proc.kill();
+  }
+});
+
+test("身份级 verified 证据（对象形态 identities，无顶层 verified）：判为已登录；显式 false 一票否决", async () => {
+  const body = `const args = process.argv.slice(2);
+if (args[0] === "--version") process.exit(0);
+if (args[0] === "auth" && args[1] === "status") {
+  process.stdout.write(JSON.stringify({
+    appId: "cli_real",
+    brand: "feishu",
+    identities: { user: { status: "ready", verified: true } },
+  }));
+  process.exit(0);
+}
+process.exit(1);`;
+  const cli = writeCli(path.join(TMP, "identities-only"), body);
+  const { proc, port } = startApp({ LARK_CLI: cli });
+  try {
+    await waitPort(port);
+    assert.equal((await getLark(port)).available, true, "identities 中存在已验证身份应算已登录");
+  } finally {
+    proc.kill();
+  }
+  const cliOff = writeCli(path.join(TMP, "real-shape-off"), realShapeCliBody(false));
+  const app2 = startApp({ LARK_CLI: cliOff });
+  try {
+    await waitPort(app2.port);
+    assert.equal((await getLark(app2.port)).available, false, "verified 显式 false 应一票否决");
+  } finally {
+    app2.proc.kill();
   }
 });
 

@@ -32,12 +32,13 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 | --- | --- | --- |
 | `server.js` | HTTP 路由 | 纯分发器：15 个内联分支，勿引入路由框架 |
 | `agent.js` | `handle(message, session, {onEvent, signal})` | 编排：链接提取 → 文档缓存 → 上下文组装（预算/选段）→ LLM/模拟回答；降级链 pi→builtin→sim |
-| `pi-agent.js` | `run/dispose/isAvailable/syncConfig` | pi SDK 适配：常驻 AgentSession 池（上限 50 FIFO）、SDK 事件转发 |
+| `pi-agent.js` | `run/dispose/isAvailable/syncConfig` | pi SDK 适配：常驻 AgentSession 池（上限 50 FIFO）、SDK 事件转发；工具定义在 `pi-lark-tools.js` |
+| `pi-lark-tools.js` | `makeLarkTools(defineTool)` | pi 工具定义：`lark_doc_get`（信封契约读文档）+ `lark_cli`（透传执行任意 lark CLI 子命令，命令面差异由模型自行探索适配） |
 | `llm-config.js` | 配置管理 | 界面保存 > 环境变量 > 默认；打码；`applyPatch` 共享归一化 |
 | `llm.js` | `chat/chatStream/test/listModels` | OpenAI 兼容客户端：chat 与 responses 两种 SSE 解析共享 `buildRequest` |
 | `store.js` | `getOrCreate/appendMessages/cacheDoc/setTitle/...` | 会话存储：**拥有全部变更与持久化**；TTL/总量/截断淘汰 |
 | `protocol.js` | 事件工厂 + `makeReply` | 流式事件与回复对象的**唯一契约** |
-| `lark.js` | `runLarkCli/cliStatus` | lark CLI 纯调用：两步直查检测（① `--version` 退出码 0 判安装 → ② `auth status --json --verify` 输出 ok+verified 判登录）；LARK_CLI 显式指定优先，否则直接执行 PATH 中的 `lark-cli`，不做安装位置兜底；成功永久缓存，失败按 LARK_PROBE_RETRY_MS 短 TTL 重试 |
+| `lark.js` | `runLarkCli/runLarkCommand/cliStatus` | lark CLI 纯调用：两步直查检测（① `--version` 退出码 0 判安装 → ② `auth status --json --verify` 按 verified 证据判登录，兼容真实 lark-cli 无 `ok` 字段的输出）；执行面不做子命令限制/命令面适配——`runLarkCli` 信封解析（确定性路径），`runLarkCommand` 原始透传（agent 通用工具）；LARK_CLI 显式指定优先，否则直接执行 PATH 中的 `lark-cli`，不做安装位置兜底；成功永久缓存，失败按 LARK_PROBE_RETRY_MS 短 TTL 重试 |
 | `markdown.js` | `renderMarkdown` | marked + 轻量消毒（去 script/iframe/内联事件） |
 
 前端（`public/`，原生 ES modules，无打包器）：
@@ -59,7 +60,7 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 
 1. **store 拥有变更与落盘**：任何对会话的写操作必须走 store 方法（`appendMessages`/`cacheDoc`/`setTitle`），**调用者不碰 `persist`、不直接改 session 字段**。
 2. **流式事件契约只在 `protocol.js`**：五种事件 `start/tool/delta/done/error`。新增事件类型只改 protocol.js + `public/app.js`（前端为文档化消费者），不许在其他文件手拼事件对象。
-3. **lark CLI 契约**：检测两步直查——`--version` 退出码 0 判安装，`auth status --json --verify` 输出顶层 `{ ok, verified }` 且均为 true 判登录；doc 类子命令输出信封 `{ code, msg, data }`，code 0 成功（子命令 `doc list` / `doc get <url|token>` / `doc search <kw>`）。未检测到 CLI 时返回友好引导信封（不执行任何命令）。
+3. **lark CLI 契约**：检测两步直查——`--version` 退出码 0 判安装；`auth status --json --verify` 按 **verified 证据**判登录（顶层 `verified === true` 即已登录，兼容真实 lark-cli 顶层 `{ appId, brand, identities, ... }` 无 `ok` 字段的形态，identities 中存在已验证身份亦可；显式 `ok === false` / `verified === false` 一票否决；信封 `{ code: 0 }` 不算已登录）。执行面**不做子命令限制、不做命令面适配**：doc 类信封 `{ code, msg, data }`（code 0 成功，约定子命令 `doc list` / `doc get <url|token>` / `doc search <kw>`）仅是输出解读约定；真实 CLI 命令面不同（如 `docs fetch`）由 pi agent 的通用 `lark_cli` 工具自行探索。未检测到 CLI 时返回友好引导信封（不执行任何命令）。
 4. **上下文预算**：LLM 输入受 `CONTEXT_BUDGET_CHARS`（默认 24000 字符）约束；超 `DOC_FULL_TEXT_MAX`（8000）的文档按问题节选 top-k 章节 + 大纲；超限类错误先裁剪最早缓存文档自愈一次。
 5. **落盘瘦身**：sessions.json 为紧凑 JSON，仅存 Markdown 原文——**html 渲染结果不落盘**（加载时现算），**docs 文档缓存只在内存**。新增字段要考虑是否落盘。
 

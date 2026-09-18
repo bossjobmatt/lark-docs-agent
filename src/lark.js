@@ -4,15 +4,17 @@ const fs = require("fs");
 /**
  * lark CLI 的纯调用方约定，检测拆成两步、全部直接执行命令判定（不扫描安装位置）：
  * - 第一步·安装检测：执行 `<cli> --version`，退出码 0 即已安装；
- * - 第二步·登录检测：执行 `<cli> auth status --json --verify`，stdout JSON 满足
- *   ok === true && verified === true 才算已登录（与真实 lark-cli 的输出契约一致）。
+ * - 第二步·登录检测：执行 `<cli> auth status --json --verify`，按 verified 证据判登录
+ *   （兼容真实 lark-cli 顶层 { appId, brand, identities, ... } 无 ok 字段的输出，见下）。
  * CLI 的确定：LARK_CLI 环境变量显式指定（真实或演示 mock fixtures/lark-demo/lark）优先，
  * 否则直接执行 PATH 中的 `lark-cli`；都没有 → 不回落任何内置实现，
  * 工具调用返回友好提示，由用户自行安装并登录。
  * 探测结果缓存：成功永久；失败按 LARK_PROBE_RETRY_MS（默认 30s，显式 0 = 每次重探）
  * 短期缓存后自动重试——启动后才安装/登录 CLI 无需重启即可被检测到。
- * 子命令输出契约：doc 类为 JSON 信封 { code, msg, data }（code 0 成功）；
- * auth status --json 输出顶层 { ok, verified, ... }。
+ * 执行面不做子命令限制、不做命令面适配，只提供两种透传程度的执行：
+ * - runLarkCli：信封解析 { code, msg, data }（code 0 成功），供确定性路径（内置编排/示例列表）；
+ * - runLarkCommand：原始透传（stdout/stderr/退出码原样返回），供 pi agent 的通用 lark_cli 工具
+ *   自行探索真实命令面（如 --help、docs fetch）并解读输出。
  * 本项目只调用 CLI，不做其安装与凭据配置。
  */
 const PROBE_TIMEOUT_MS = 4000;
@@ -24,16 +26,6 @@ const LOGIN_ENV = { LARKSUITE_CLI_NO_UPDATE_NOTIFIER: "1", LARKSUITE_CLI_NO_SKIL
 let resolved = null; // { available: true, source, path } —— 成功结果永久缓存
 let failed = null; // { result, expiresAt } —— 失败结果短 TTL 缓存，到期重探
 let inflight = null; // 并发首次探测去重
-
-/** 读取文件首行，判断是否 node 脚本（无执行位的 JS CLI 需经 node 启动） */
-function isNodeScript(cliPath) {
-  try {
-    const head = fs.readFileSync(cliPath, "utf8").slice(0, 64);
-    return head.startsWith("#!") && head.includes("node");
-  } catch {
-    return false;
-  }
-}
 
 /** 提取 stdout 中的首个 JSON 对象；整体解析失败时容忍非 JSON 前缀（如自更新提示），从首个 { 截取重试 */
 function parseJsonOutput(stdout) {
@@ -48,6 +40,16 @@ function parseJsonOutput(stdout) {
     } catch {}
   }
   return null;
+}
+
+/** 读取文件首行，判断是否 node 脚本（无执行位的 JS CLI 需经 node 启动） */
+function isNodeScript(cliPath) {
+  try {
+    const head = fs.readFileSync(cliPath, "utf8").slice(0, 64);
+    return head.startsWith("#!") && head.includes("node");
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -107,14 +109,41 @@ async function isLarkCliInstalled(cliPath) {
   return r.exit === 0;
 }
 
-/** ② 登录检测：执行 `<cli> auth status --json --verify`，ok 与 verified 均为 true 才算已登录 */
+/**
+ * 登录判据（verified 证据制，兼容真实 lark-cli 的输出形态）：
+ * - 上游约定形态：顶层 { ok, verified }，两者均为 true；
+ * - 真实输出形态：顶层 { appId, brand, identities, ... }，可能没有 ok 字段——
+ *   顶层 verified === true，或 identities（数组/对象均可）中存在 verified === true 的身份即可；
+ * - 显式否定（顶层 ok === false 或 verified === false）一票否决；
+ * - 信封 { code: 0 } 等无任何 verified 证据的输出不算已登录。
+ */
+function identitiesVerified(identities) {
+  if (!identities) return false;
+  const entries = Array.isArray(identities) ? identities : Object.values(identities);
+  let any = false;
+  for (const e of entries) {
+    if (!e || typeof e !== "object") continue;
+    if (e.verified === false) return false;
+    if (e.verified === true) any = true;
+  }
+  return any;
+}
+
+function isLoginAccepted(status) {
+  if (!status || typeof status !== "object") return false;
+  if (status.ok === false || status.verified === false) return false;
+  if (status.verified === true) return true;
+  return identitiesVerified(status.identities);
+}
+
+/** ② 登录检测：执行 `<cli> auth status --json --verify`，按 verified 证据判已登录 */
 async function isLarkLoggedIn(cliPath) {
   const r = await spawnRaw(cliPath, ["auth", "status", "--json", "--verify"], LOGIN_ENV, PROBE_TIMEOUT_MS);
   if (r.exit !== 0) {
     return { loggedIn: false, detail: (r.stderr || r.stdout).trim().slice(0, 200) };
   }
   const status = parseJsonOutput(r.stdout);
-  if (status && status.ok === true && status.verified === true) {
+  if (isLoginAccepted(status)) {
     return { loggedIn: true, detail: "" };
   }
   const brief = status ? JSON.stringify(status) : (r.stdout || r.stderr).trim();
@@ -198,27 +227,59 @@ async function cliStatus() {
   return resolveCli();
 }
 
-/**
- * 执行 lark CLI 子命令，返回统一结果 { ok, code, msg, data }。
- * CLI 崩溃、输出非法 JSON、超时都会被兜住，不会让服务端抛异常。
- * 未检测到可用 CLI 时不执行任何命令，直接返回友好提示（前端徽标与回复原样透出）。
- */
-async function runLarkCli(args, timeoutMs = 10000) {
+/** 检测门：通过则返回 { ok: true, path }；未检测到可用 CLI 时不执行任何命令，返回友好提示 */
+async function gateCommand() {
   const status = await resolveCli();
-  if (!status.available) {
-    const reason = status.reason ? `最近检测：${status.reason}` : "";
-    return {
-      ok: false,
-      code: -2,
-      msg:
-        "未检测到已安装并登录的 lark CLI：解析飞书/Lark 文档需要本地 lark-cli 通过两步检测" +
-        "（`--version` 可执行、`auth status --json --verify` 确认已登录）。请安装并登录后重试，" +
-        "或用 LARK_CLI 环境变量显式指定；检测失败后会自动重试，无需重启。" +
-        reason,
-      data: null,
-    };
-  }
-  return runEnvelope(status.path, args, timeoutMs);
+  if (status.available) return { ok: true, path: status.path };
+  const reason = status.reason ? `最近检测：${status.reason}` : "";
+  return {
+    ok: false,
+    code: -2,
+    msg:
+      "未检测到已安装并登录的 lark CLI：解析飞书/Lark 文档需要本地 lark-cli 通过两步检测" +
+      "（`--version` 可执行、`auth status --json --verify` 确认已登录）。请安装并登录后重试，" +
+      "或用 LARK_CLI 环境变量显式指定；检测失败后会自动重试，无需重启。" +
+      reason,
+    data: null,
+  };
 }
 
-module.exports = { runLarkCli, cliStatus };
+/**
+ * 信封执行：doc 类子命令按 { code, msg, data } 解析，返回统一结果 { ok, code, msg, data }。
+ * CLI 崩溃、输出非法 JSON、超时都会被兜住，不会让服务端抛异常。
+ * 不限制子命令——信封只是输出解读约定，命令面由调用方决定。
+ */
+async function runLarkCli(args, timeoutMs = 10000) {
+  const gate = await gateCommand();
+  if (!gate.ok) return gate;
+  return runEnvelope(gate.path, args, timeoutMs);
+}
+
+/**
+ * 原始透传执行：不限制子命令、不解析输出，stdout/stderr/退出码原样返回，
+ * 供 pi agent 的通用 lark_cli 工具自行探索真实命令面（如 --help、docs fetch）并解读输出。
+ * 与 runLarkCli 共用同一检测门（code -2 友好提示）；超时/启动失败兜底为 ok:false。
+ */
+async function runLarkCommand(args, timeoutMs = 30000) {
+  const gate = await gateCommand();
+  if (!gate.ok) return { ...gate, exit: null, stdout: "", stderr: "" };
+  const r = await spawnRaw(gate.path, args, {}, timeoutMs);
+  return {
+    ok: !r.error && !r.timedOut && r.exit === 0,
+    code: r.error || r.timedOut ? -1 : r.exit,
+    exit: r.exit,
+    stdout: r.stdout,
+    stderr: r.stderr,
+    timedOut: r.timedOut || undefined,
+    msg: r.timedOut
+      ? `lark CLI 执行超时（>${timeoutMs}ms）`
+      : r.error
+        ? `lark CLI 启动失败: ${r.stderr}`
+        : r.exit === 0
+          ? "success"
+          : (r.stderr || r.stdout).trim().slice(0, 200) || `退出码 ${r.exit}`,
+    data: null,
+  };
+}
+
+module.exports = { runLarkCli, runLarkCommand, cliStatus };
