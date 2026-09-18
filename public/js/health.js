@@ -8,7 +8,8 @@ const piEl = document.getElementById("badge-pi");
 export function updateBadge(mode, model, agentMode, lark, piAvailable) {
   if (agentMode === "pi") {
     modeEl.className = "badge";
-    modeEl.textContent = "pi Agent 模式";
+    // pi 模式同样展示当前使用的模型名，便于确认界面配置的模型已实际生效
+    modeEl.textContent = `pi Agent 模式${model ? ` · ${model}` : ""}`;
   } else if (mode === "llm") {
     modeEl.className = "badge";
     modeEl.textContent = `LLM 模式${model ? ` · ${model}` : ""}`;
