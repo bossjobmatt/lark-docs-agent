@@ -66,7 +66,7 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 2. **流式事件契约只在 `protocol.js`**：五种事件 `start/tool/delta/done/error`。新增事件类型只改 protocol.js + `public/app.js`（前端为文档化消费者），不许在其他文件手拼事件对象。
 3. **lark CLI 契约**：检测两步直查——`--version` 退出码 0 判安装；`auth status --json --verify` 按 **verified 证据**判登录（顶层 `verified === true` 即已登录，兼容真实 lark-cli 顶层 `{ appId, brand, identities, ... }` 无 `ok` 字段的形态，identities 中存在已验证身份亦可；显式 `ok === false` / `verified === false` 一票否决；信封 `{ code: 0 }` 不算已登录）。执行面**不做子命令限制、不做命令面适配**：doc 类信封 `{ code, msg, data }`（code 0 成功，约定子命令 `doc list` / `doc get <url|token>` / `doc search <kw>`）仅是输出解读约定；真实 CLI 命令面不同（如 `docs fetch`）由 pi agent 的通用 `lark_cli` 工具自行探索。未检测到 CLI 时返回友好引导信封（不执行任何命令）。
 4. **上下文预算**：LLM 输入受 `CONTEXT_BUDGET_CHARS`（默认 24000 字符）约束；超 `DOC_FULL_TEXT_MAX`（8000）的文档按问题节选 top-k 章节 + 大纲；超限类错误先裁剪最早缓存文档自愈一次。
-5. **落盘瘦身**：sessions.json 为紧凑 JSON，仅存 Markdown 原文——**html 渲染结果不落盘**（加载时现算），**docs 文档缓存只在内存**，**消息图片（images）只在内存**（落盘剥离，刷新后历史不回显图片）。新增字段要考虑是否落盘。
+5. **落盘瘦身**：sessions.json 为紧凑 JSON，仅存 Markdown 原文——**html 渲染结果不落盘**（加载时现算），**docs 文档缓存只在内存**，**消息图片（images）只在内存**（落盘剥离：页面刷新不丢、服务重启后仅留「（图片）」占位）。新增字段要考虑是否落盘。
 
 ## 测试
 

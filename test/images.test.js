@@ -178,16 +178,21 @@ test("e2e：/api/chat/stream 带 images → 事件序列 start → delta×n → 
   assert.equal(events.at(-1).type, "done");
 });
 
-test("e2e：纯图片消息（无文本）可发送，图片引导文本进 LLM", async () => {
+test("e2e：纯图片消息（无文本）可发送，图片引导文本进 LLM，历史留「（图片）」占位", async () => {
   const res = await request(
     APP_PORT,
     { method: "POST", path: "/api/chat", headers: { "Content-Type": "application/json" } },
     JSON.stringify({ images: [{ mime: "image/png", data: PNG_1PX }] })
   );
   assert.equal(res.status, 200);
+  const { sessionId } = JSON.parse(res.text);
   const body = await fetchMultimodalBody();
   const lastUser = (body.messages || []).filter((m) => m.role === "user").pop();
   assert.equal(lastUser.content.find((c) => c.type === "text").text, "请分析这些图片");
+
+  const history = await request(APP_PORT, { path: `/api/history?sessionId=${encodeURIComponent(sessionId)}` });
+  const stored = JSON.parse(history.text).messages.find((m) => m.role === "user");
+  assert.equal(stored.content, "（图片）", "纯图片消息应落「（图片）」占位，历史与标题生成有依据");
 });
 
 test("e2e：非法图片与空消息 → 400，错误信息面向用户", async () => {

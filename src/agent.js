@@ -214,8 +214,9 @@ function maybeGenerateTitle(session) {
 }
 
 async function handle(message, session, { onEvent, signal, images = [] } = {}) {
-  const userMsg = { role: "user", content: message, ts: nowTs() };
-  if (images.length) userMsg.images = images; // 图片仅内存（落盘时剥离，见 store.persist），刷新后不回显
+  // 纯图片消息落「（图片）」占位：气泡不空、服务重启后历史可读、标题生成有依据
+  const userMsg = { role: "user", content: message || (images.length ? "（图片）" : ""), ts: nowTs() };
+  if (images.length) userMsg.images = images; // 图片仅内存（落盘时剥离，见 store.persist）
   store.appendMessages(session.id, [userMsg]);
 
   let reply;

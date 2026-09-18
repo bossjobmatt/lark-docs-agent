@@ -64,7 +64,6 @@ export function renderMessage(m) {
     // 回答卡片：气泡 + 底部操作条（复制 Markdown 原文 / Raw 与渲染切换）
     const holder = el("div", "bubble-block");
     holder.appendChild(bubble);
-
     const actions = el("div", "bubble-actions");
 
     const copyBtn = el("button", "mini-action");
@@ -100,7 +99,8 @@ export function renderMessage(m) {
     holder.appendChild(actions);
     wrap.appendChild(holder);
   } else {
-    wrap.appendChild(bubble);
+    // 纯图片消息（无文字）有缩略图即可，不再渲染 28px 空气泡
+    if (m.content || !(m.images && m.images.length)) wrap.appendChild(bubble);
   }
   return wrap;
 }
