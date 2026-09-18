@@ -4,7 +4,7 @@
 
 ## 项目是什么
 
-**Lark 文档助手（本地演示）**：本地 Web 服务，用户粘贴飞书/Lark 文档链接 + 问题，AI Agent 调用**本地已认证的 lark CLI** 读取文档后回答。定位与边界务必遵守：
+**Lark 文档助手（本地演示）**：本地 Web 服务，用户粘贴飞书/Lark 文档链接 + 问题，AI Agent 调用**本地已安装并登录的 lark CLI** 读取文档后回答。定位与边界务必遵守：
 
 - 本项目是 lark CLI 的**纯调用方**——不做其安装、认证、凭据管理，也不实现/内置默认 CLI（`fixtures/lark-demo/lark` 仅为显式启用的演示 mock）。完整边界见 `README.md` 的「职责边界」一节。
 - LLM 凭据通过界面配置（`data/llm-config.json`，明文 Key，已被 gitignore，**绝不提交**）。
@@ -22,7 +22,7 @@
 npm start          # 启动服务（127.0.0.1:3737）
 npm run dev        # node --watch 开发模式
 npm run demo       # 演示模式：以内置模拟 CLI 跑通全链路（无需任何真实凭据）
-npm test           # node --test 测试套件（22 用例，含 spawn 服务的 HTTP e2e）
+npm test           # node --test 测试套件（28 用例，含 spawn 服务的 HTTP e2e）
 npm run lark -- doc list   # 直接调用演示 mock CLI
 ```
 
@@ -37,7 +37,7 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 | `llm.js` | `chat/chatStream/test/listModels` | OpenAI 兼容客户端：chat 与 responses 两种 SSE 解析共享 `buildRequest` |
 | `store.js` | `getOrCreate/appendMessages/cacheDoc/setTitle/...` | 会话存储：**拥有全部变更与持久化**；TTL/总量/截断淘汰 |
 | `protocol.js` | 事件工厂 + `makeReply` | 流式事件与回复对象的**唯一契约** |
-| `lark.js` | `runLarkCli/cliStatus` | lark CLI 纯调用：三级解析（LARK_CLI → PATH 探测与常见位置兜底，均须 auth status 认证 → 无）；成功永久缓存，失败按 LARK_PROBE_RETRY_MS 短 TTL 重试 |
+| `lark.js` | `runLarkCli/cliStatus` | lark CLI 纯调用：两步直查检测（① `--version` 退出码 0 判安装 → ② `auth status --json --verify` 输出 ok+verified 判登录）；LARK_CLI 显式指定优先，否则直接执行 PATH 中的 `lark-cli`，不做安装位置兜底；成功永久缓存，失败按 LARK_PROBE_RETRY_MS 短 TTL 重试 |
 | `markdown.js` | `renderMarkdown` | marked + 轻量消毒（去 script/iframe/内联事件） |
 
 前端（`public/`，原生 ES modules，无打包器）：
@@ -59,7 +59,7 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 
 1. **store 拥有变更与落盘**：任何对会话的写操作必须走 store 方法（`appendMessages`/`cacheDoc`/`setTitle`），**调用者不碰 `persist`、不直接改 session 字段**。
 2. **流式事件契约只在 `protocol.js`**：五种事件 `start/tool/delta/done/error`。新增事件类型只改 protocol.js + `public/app.js`（前端为文档化消费者），不许在其他文件手拼事件对象。
-3. **lark CLI 信封约定**：`{ code, msg, data }`，code 0 成功；子命令 `auth status` / `doc list` / `doc get <url|token>` / `doc search <kw>`。未检测到 CLI 时返回友好引导信封（不执行任何命令）。
+3. **lark CLI 契约**：检测两步直查——`--version` 退出码 0 判安装，`auth status --json --verify` 输出顶层 `{ ok, verified }` 且均为 true 判登录；doc 类子命令输出信封 `{ code, msg, data }`，code 0 成功（子命令 `doc list` / `doc get <url|token>` / `doc search <kw>`）。未检测到 CLI 时返回友好引导信封（不执行任何命令）。
 4. **上下文预算**：LLM 输入受 `CONTEXT_BUDGET_CHARS`（默认 24000 字符）约束；超 `DOC_FULL_TEXT_MAX`（8000）的文档按问题节选 top-k 章节 + 大纲；超限类错误先裁剪最早缓存文档自愈一次。
 5. **落盘瘦身**：sessions.json 为紧凑 JSON，仅存 Markdown 原文——**html 渲染结果不落盘**（加载时现算），**docs 文档缓存只在内存**。新增字段要考虑是否落盘。
 
@@ -75,9 +75,8 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `PORT` / `HOST` | 3737 / 127.0.0.1 | 监听地址 |
-| `LARK_CLI` | 未设置 | 显式指定 lark CLI 路径（同样须通过 `lark auth status` 认证检查）；未设则探测 PATH |
+| `LARK_CLI` | 未设置 | 显式指定 lark CLI 路径（同样须通过两步检测）；未设则直接执行 PATH 中的 `lark-cli` |
 | `LARK_PROBE_RETRY_MS` | 30000 | 探测失败的缓存时长，到期自动重探（显式 0 生效 = 每次调用重探） |
-| `LARK_PATH_FALLBACKS` | `/opt/homebrew/bin/lark:/usr/local/bin/lark` | PATH 探测失败的兜底候选（冒号分隔；空串禁用） |
 | `SESSIONS_FILE` / `LLM_CONFIG_FILE` | `data/` 下 | **测试用**落盘覆盖 |
 | `SESSION_TTL_DAYS` / `SESSION_MAX_COUNT` / `SESSION_MAX_MESSAGES` | 7 / 100 / 50 | 会话淘汰（显式 0 生效） |
 | `CONTEXT_BUDGET_CHARS` / `DOC_FULL_TEXT_MAX` | 24000 / 8000 | LLM 上下文预算 |

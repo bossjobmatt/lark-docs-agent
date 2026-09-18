@@ -1,21 +1,25 @@
 const { spawn } = require("child_process");
-const path = require("path");
 const fs = require("fs");
 
 /**
- * lark CLI 的纯调用方约定：
- * - LARK_CLI 环境变量显式指向 CLI（真实或演示 mock fixtures/lark-demo/lark），优先级最高；
- * - 否则依次探测 PATH 中的 lark 与兜底候选（默认 /opt/homebrew/bin、/usr/local/bin，
- *   可用 LARK_PATH_FALLBACKS 覆盖，空串禁用——launchd/GUI 启动时进程 PATH 往往不含用户安装目录），
- *   候选须通过 `lark auth status` 认证检查；按信封约定 code 0 即视为成功，不深挖 data 内部字段；
- * - 都没有 → 不回落任何内置实现，工具调用返回友好提示，由用户自行安装。
+ * lark CLI 的纯调用方约定，检测拆成两步、全部直接执行命令判定（不扫描安装位置）：
+ * - 第一步·安装检测：执行 `<cli> --version`，退出码 0 即已安装；
+ * - 第二步·登录检测：执行 `<cli> auth status --json --verify`，stdout JSON 满足
+ *   ok === true && verified === true 才算已登录（与真实 lark-cli 的输出契约一致）。
+ * CLI 的确定：LARK_CLI 环境变量显式指定（真实或演示 mock fixtures/lark-demo/lark）优先，
+ * 否则直接执行 PATH 中的 `lark-cli`；都没有 → 不回落任何内置实现，
+ * 工具调用返回友好提示，由用户自行安装并登录。
  * 探测结果缓存：成功永久；失败按 LARK_PROBE_RETRY_MS（默认 30s，显式 0 = 每次重探）
- * 短期缓存后自动重试——启动后才安装/认证 CLI 无需重启即可被检测到。
+ * 短期缓存后自动重试——启动后才安装/登录 CLI 无需重启即可被检测到。
+ * 子命令输出契约：doc 类为 JSON 信封 { code, msg, data }（code 0 成功）；
+ * auth status --json 输出顶层 { ok, verified, ... }。
  * 本项目只调用 CLI，不做其安装与凭据配置。
  */
 const PROBE_TIMEOUT_MS = 4000;
 const PROBE_RETRY_DEFAULT_MS = 30000;
-const DEFAULT_PATH_FALLBACKS = ["/opt/homebrew/bin/lark", "/usr/local/bin/lark"];
+const DEFAULT_COMMAND = "lark-cli";
+// 抑制真实 lark-cli 的更新/技能提示，避免非 JSON 内容混入 stdout 干扰登录判据解析
+const LOGIN_ENV = { LARKSUITE_CLI_NO_UPDATE_NOTIFIER: "1", LARKSUITE_CLI_NO_SKILLS_NOTIFIER: "1" };
 
 let resolved = null; // { available: true, source, path } —— 成功结果永久缓存
 let failed = null; // { result, expiresAt } —— 失败结果短 TTL 缓存，到期重探
@@ -31,8 +35,8 @@ function isNodeScript(cliPath) {
   }
 }
 
-/** 解析 stdout 信封；整体解析失败时容忍非 JSON 前缀（如自更新提示），从首个 { 截取重试 */
-function parseEnvelope(stdout) {
+/** 提取 stdout 中的首个 JSON 对象；整体解析失败时容忍非 JSON 前缀（如自更新提示），从首个 { 截取重试 */
+function parseJsonOutput(stdout) {
   const text = stdout.trim();
   try {
     return JSON.parse(text);
@@ -46,13 +50,21 @@ function parseEnvelope(stdout) {
   return null;
 }
 
-function spawnCli(cliPath, args, timeoutMs) {
+/**
+ * 底层执行：spawn 收集退出码与原始输出，不做任何输出解析。
+ * 无执行位/非可执行格式的 node 脚本：回退经 node 启动（内置演示 mock 即此形态）。
+ * 仅对路径形态的 cliPath 启用——裸名（如 "lark-cli"）由 execvp 按 PATH 解析，
+ * 若再按 CWD 相对读取同名文件，会误执行工作目录下的脚本。
+ */
+function spawnRaw(cliPath, args, extraEnv, timeoutMs) {
   return new Promise((resolve) => {
-    const direct = spawn(cliPath, args, { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let settled = false;
-    let child = direct;
+    let child = spawn(cliPath, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, ...extraEnv },
+    });
 
     const finish = (result) => {
       if (settled) return;
@@ -63,74 +75,80 @@ function spawnCli(cliPath, args, timeoutMs) {
 
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
-      finish({ ok: false, code: -1, msg: `lark CLI 执行超时（>${timeoutMs}ms）`, data: null });
+      finish({ exit: -1, stdout, stderr, timedOut: true, error: false });
     }, timeoutMs);
 
-    direct.stdout.on("data", (d) => (stdout += d));
-    direct.stderr.on("data", (d) => (stderr += d));
-    // 无执行位/非可执行格式的 node 脚本：回退经 node 启动（内置演示 mock 即此形态）。
-    // 仅对路径形态的 cliPath 启用——裸名（如 "lark"）由 execvp 按 PATH 解析，
-    // 若再按 CWD 相对读取同名文件，会误执行工作目录下的脚本。
-    direct.on("error", (e) => {
-      direct.removeAllListeners("close"); // 避免 error 后 close 双触发抢先用空输出结算
+    child.stdout.on("data", (d) => (stdout += d));
+    child.stderr.on("data", (d) => (stderr += d));
+
+    const onClose = (code) => finish({ exit: code, stdout, stderr, timedOut: false, error: false });
+    child.on("close", onClose);
+    child.on("error", (e) => {
+      child.removeAllListeners("close"); // 避免 error 后 close 双触发抢先用空输出结算
       if (cliPath.includes("/") && isNodeScript(cliPath)) {
-        child = spawn(process.execPath, [cliPath, ...args], { stdio: ["ignore", "pipe", "pipe"] });
+        child = spawn(process.execPath, [cliPath, ...args], {
+          stdio: ["ignore", "pipe", "pipe"],
+          env: { ...process.env, ...extraEnv },
+        });
         child.stdout.on("data", (d) => (stdout += d));
         child.stderr.on("data", (d) => (stderr += d));
         child.on("close", onClose);
-        child.on("error", (e2) => finish({ ok: false, code: -1, msg: `lark CLI 启动失败: ${e2.message}`, data: null }));
+        child.on("error", (e2) => finish({ exit: -1, stdout, stderr: `lark CLI 启动失败: ${e2.message}`, timedOut: false, error: true }));
       } else {
-        finish({ ok: false, code: -1, msg: `lark CLI 启动失败: ${e.message}`, data: null });
+        finish({ exit: -1, stdout, stderr: `lark CLI 启动失败: ${e.message}`, timedOut: false, error: true });
       }
     });
-
-    const onClose = () => {
-      const envelope = parseEnvelope(stdout);
-      if (envelope && typeof envelope.code === "number") {
-        finish({ ok: envelope.code === 0, code: envelope.code, msg: envelope.msg, data: envelope.data });
-      } else {
-        finish({ ok: false, code: -1, msg: `lark CLI 输出无法解析: ${(stderr || stdout).slice(0, 200)}`, data: null });
-      }
-    };
-    direct.on("close", onClose);
   });
 }
 
-/** 一次探测失败后的缓存时长：显式 0 生效（每次调用重探），默认 30s */
-function probeRetryMs() {
-  const v = Number(process.env.LARK_PROBE_RETRY_MS);
-  return Number.isFinite(v) && v >= 0 ? v : PROBE_RETRY_DEFAULT_MS;
+/** ① 安装检测：直接执行 `<cli> --version`，退出码 0 即已安装 */
+async function isLarkCliInstalled(cliPath) {
+  const r = await spawnRaw(cliPath, ["--version"], {}, PROBE_TIMEOUT_MS);
+  return r.exit === 0;
 }
 
-/** PATH 探测失败后的兜底候选（冒号分隔）；显式空串禁用（测试封闭性用） */
-function pathFallbacks() {
-  const raw = process.env.LARK_PATH_FALLBACKS;
-  if (raw !== undefined) return raw ? raw.split(":").filter(Boolean) : [];
-  return DEFAULT_PATH_FALLBACKS;
+/** ② 登录检测：执行 `<cli> auth status --json --verify`，ok 与 verified 均为 true 才算已登录 */
+async function isLarkLoggedIn(cliPath) {
+  const r = await spawnRaw(cliPath, ["auth", "status", "--json", "--verify"], LOGIN_ENV, PROBE_TIMEOUT_MS);
+  if (r.exit !== 0) {
+    return { loggedIn: false, detail: (r.stderr || r.stdout).trim().slice(0, 200) };
+  }
+  const status = parseJsonOutput(r.stdout);
+  if (status && status.ok === true && status.verified === true) {
+    return { loggedIn: true, detail: "" };
+  }
+  const brief = status ? JSON.stringify(status) : (r.stdout || r.stderr).trim();
+  return { loggedIn: false, detail: `${String(brief).slice(0, 160) || "无输出"}` };
 }
 
-/** 一次完整解析：LARK_CLI 显式指定（同样须通过认证检查）→ PATH 探测与常见位置兜底 → 无 */
+/** 一次完整检测（两步直查）：LARK_CLI 显式指定优先，否则直接执行 PATH 中的 lark-cli */
 async function probeResolve() {
   const envPath = process.env.LARK_CLI;
-  if (envPath) {
-    const probe = await spawnCli(envPath, ["auth", "status"], PROBE_TIMEOUT_MS);
-    return probe.ok
-      ? { available: true, source: "env", path: envPath }
-      : {
-          available: false,
-          source: "env",
-          path: envPath,
-          reason: `LARK_CLI 指向的 CLI 未通过认证检查（lark auth status）：${probe.msg}`,
-        };
+  const cliPath = envPath || DEFAULT_COMMAND;
+  const isEnv = Boolean(envPath);
+  // 成功时 source 标识来源（env / path）；失败沿用旧语义：PATH 直查无可用 CLI 记 "none"
+  const okSource = isEnv ? "env" : "path";
+  const failSource = isEnv ? "env" : "none";
+  if (!(await isLarkCliInstalled(cliPath))) {
+    return {
+      available: false,
+      source: failSource,
+      path: cliPath,
+      reason: isEnv
+        ? "LARK_CLI 指向的 CLI 无法执行（--version 失败）：确认路径后无需重启，检测会自动重试"
+        : "未找到可执行的 lark-cli（--version 失败）：请安装 lark CLI，或用 LARK_CLI 环境变量显式指定",
+    };
   }
-  const candidates = ["lark", ...pathFallbacks()];
-  let reason = "未找到 lark CLI";
-  for (const candidate of candidates) {
-    const probe = await spawnCli(candidate, ["auth", "status"], PROBE_TIMEOUT_MS);
-    if (probe.ok) return { available: true, source: "path", path: candidate };
-    reason = probe.msg;
+  const login = await isLarkLoggedIn(cliPath);
+  if (!login.loggedIn) {
+    return {
+      available: false,
+      source: failSource,
+      path: cliPath,
+      reason: `lark-cli 已安装但未通过登录检测（auth status --json --verify）：${login.detail}`,
+    };
   }
-  return { available: false, source: "none", path: null, reason };
+  return { available: true, source: okSource, path: cliPath };
 }
 
 /** 解析并缓存结果：成功永久；失败短 TTL 后重探；并发调用共享同一次探测 */
@@ -146,6 +164,33 @@ async function resolveCli() {
   if (result.available) resolved = result;
   else failed = { result, expiresAt: Date.now() + probeRetryMs() };
   return result;
+}
+
+/** 一次探测失败后的缓存时长：显式 0 生效（每次调用重探），默认 30s */
+function probeRetryMs() {
+  const v = Number(process.env.LARK_PROBE_RETRY_MS);
+  return Number.isFinite(v) && v >= 0 ? v : PROBE_RETRY_DEFAULT_MS;
+}
+
+/** doc 类子命令的信封执行：{ code, msg, data }，code 0 成功；崩溃、非法 JSON、超时都兜住 */
+async function runEnvelope(cliPath, args, timeoutMs) {
+  const r = await spawnRaw(cliPath, args, {}, timeoutMs);
+  if (r.timedOut) {
+    return { ok: false, code: -1, msg: `lark CLI 执行超时（>${timeoutMs}ms）`, data: null };
+  }
+  if (r.error) {
+    return { ok: false, code: -1, msg: r.stderr.slice(0, 200), data: null };
+  }
+  const envelope = parseJsonOutput(r.stdout);
+  if (envelope && typeof envelope.code === "number") {
+    return { ok: envelope.code === 0, code: envelope.code, msg: envelope.msg, data: envelope.data };
+  }
+  return {
+    ok: false,
+    code: -1,
+    msg: `lark CLI 输出无法解析: ${(r.stderr || r.stdout).slice(0, 200)}`,
+    data: null,
+  };
 }
 
 /** 当前 CLI 状态（供 /api/health 展示；未解析时触发一次探测，失败短 TTL 后自动重探） */
@@ -166,13 +211,14 @@ async function runLarkCli(args, timeoutMs = 10000) {
       ok: false,
       code: -2,
       msg:
-        "解析飞书/Lark 文档需要本地安装并完成认证的 lark CLI：请安装后设置 LARK_CLI 环境变量指向它，" +
-        "或确保 PATH 中的 `lark` 已通过 `lark auth status` 认证。当前未检测到可用 CLI，" +
-        `检测失败后会自动重试，无需重启。${reason}`,
+        "未检测到已安装并登录的 lark CLI：解析飞书/Lark 文档需要本地 lark-cli 通过两步检测" +
+        "（`--version` 可执行、`auth status --json --verify` 确认已登录）。请安装并登录后重试，" +
+        "或用 LARK_CLI 环境变量显式指定；检测失败后会自动重试，无需重启。" +
+        reason,
       data: null,
     };
   }
-  return spawnCli(status.path, args, timeoutMs);
+  return runEnvelope(status.path, args, timeoutMs);
 }
 
 module.exports = { runLarkCli, cliStatus };

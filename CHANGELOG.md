@@ -7,7 +7,7 @@
 
 ### 修复
 
-- **lark CLI 检测加固**：`LARK_CLI` 显式指定同样须通过 `lark auth status` 认证检查（此前不验证即假报可用，错误延迟到首次调用才暴露）；探测成功判据回归信封约定 `code === 0`，不再要求演示 mock 的 `data.status` 字段；PATH 探测失败新增常见安装位置兜底（`/opt/homebrew/bin`、`/usr/local/bin`，`LARK_PATH_FALLBACKS` 可覆盖/禁用，覆盖 launchd/GUI 启动时进程 PATH 缺失场景）；探测失败改为短 TTL（新环境变量 `LARK_PROBE_RETRY_MS`，默认 30s）自动重试，装好 CLI 无需重启；stdout 信封解析容忍非 JSON 前缀（自更新提示等不再破坏解析）；PATH 探测的 node 脚本兜底仅对路径形态生效（不误执行 CWD 下同名脚本）。新增 `test/lark-probe.test.js`（4 用例，总计 26）。
+- **lark CLI 检测加固**：`LARK_CLI` 显式指定同样须通过检测（此前不验证即假报可用，错误延迟到首次调用才暴露）；探测失败改为短 TTL（新环境变量 `LARK_PROBE_RETRY_MS`，默认 30s）自动重试，装好 CLI 无需重启；stdout JSON 解析容忍非 JSON 前缀（自更新提示等不再破坏解析）；node 脚本兜底仅对路径形态生效（不误执行 CWD 下同名脚本）。
 - 页面加载后立即发送消息时，晚到的会话历史恢复（`refresh`）会整建消息流、抹掉正在流式渲染的气泡（回复在后台完成但不可见）；初始化现在在流式进行中跳过历史恢复。
 
 ### 新增
@@ -16,6 +16,7 @@
 
 ### 变更
 
+- **lark CLI 检测简化为两步直查**：① `<cli> --version` 退出码 0 判已安装；② `<cli> auth status --json --verify`（带 `LARKSUITE_CLI_NO_UPDATE_NOTIFIER`/`LARKSUITE_CLI_NO_SKILLS_NOTIFIER` 抑制提示）输出 `ok === true && verified === true` 判已登录——与真实 lark-cli 契约一致，信封 `code === 0` 不再作为登录判据。删除安装位置兜底探测及环境变量 `LARK_PATH_FALLBACKS`：`LARK_CLI` 显式指定优先，否则直接执行 PATH 中的 `lark-cli`（默认命令名由 `lark` 改为 `lark-cli`）。演示 mock 同步支持 `--version` 与 `{ ok, verified }` 登录形状；`test/lark-probe.test.js` 重写为两步判据用例（6 用例，总计 28）。
 - **流式渲染空白治理**：流式期间改为「稳定前缀 + 活跃尾行」增量渲染——marked 只解析完整行，半截块开头（`##`/`-`/``` 围栏）不再被渲染成空标题/空列表项/空代码块（实测消除全部空白帧，在屏 119–351ms → 0）；未完行以纯文本尾随保持打字机观感，围栏开启行在无代码内容时退回尾行。阶段提示（typing）改为隐藏/复现：正文出现即让位，流中停顿超 2s 复用同一元素提示「等待模型响应…」。流式引擎拆分至新模块 `public/js/stream.js`（`chat.js` 回到 ≤300 行约束内）。
 - **marked 升级 12.0.2 → 18.0.13**：v13–v18 的破坏性变更均不触及本项目使用的 `marked.parse()` + `gfm`/`breaks` API 面（22 项渲染语料对比仅 1 项良性差异）；vendored UMD 随 npm 依赖同步（v16 起为压缩版，45.8 KB ← 100.5 KB）。**Node 下限由 18 升至 20.19**（marked v16+ 仅提供 ESM 构建，服务端 `require("marked")` 依赖 require(esm)），`engines`、`AGENTS.md`、README 同步更新。
 - **体验优化**：生成期间发送键变「⏹ 停止」（经 AbortController 中止，服务端同步中止上游请求）；流式期间用 vendored marked 增量渲染（节流 ~90ms + 轻量消毒），done 后仍替换为服务端权威渲染；自动滚动节流（用户上翻暂停跟随）；typing 指示随事件阶段更新且 2s 无进展提示「等待模型响应…」（计时覆盖等待响应头阶段）；失败气泡带「↻ 重试」；删除会话二次确认；等待期间输入框保持可编辑。

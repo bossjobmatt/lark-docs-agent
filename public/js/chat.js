@@ -29,7 +29,7 @@ export function refresh(history) {
 export function showWelcome(larkAvailable = true) {
   const larkHint = larkAvailable
     ? ""
-    : '<p style="color:#b45309">⚠️ 未检测到本地已认证的 lark CLI——解析飞书/Lark 文档需要本地安装并完成认证（<code>LARK_CLI</code> 环境变量或 PATH 中的 <code>lark</code>）。装好并完成认证后无需重启，检测会自动重试（刷新页面立即生效）。</p>';
+    : '<p style="color:#b45309">⚠️ 未检测到本地已安装并登录的 lark CLI——解析飞书/Lark 文档需要本地 <code>lark-cli</code> 通过两步检测（<code>--version</code> 可执行、<code>auth status --json --verify</code> 确认已登录），可用 <code>LARK_CLI</code> 环境变量显式指定或确保 PATH 可用。装好并登录后无需重启，检测会自动重试（刷新页面立即生效）。</p>';
   chatEl.appendChild(
     renderMessage({
       role: "assistant",

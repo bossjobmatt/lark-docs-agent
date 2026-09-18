@@ -3,10 +3,12 @@
  * 模拟版 Lark CLI（mock）。
  *
  * 真实项目中可替换为基于飞书开放平台 OpenAPI 实现的 CLI，只要保持输出约定：
- *   stdout 输出 JSON 信封 { code, msg, data }，code === 0 表示成功，进程退出码与之对应。
+ *   auth status（--json --verify）→ 顶层 { ok, verified, ... }，ok 且 verified 为 true 表示已登录（与真实 lark-cli 一致）；
+ *   其余子命令 → stdout 输出 JSON 信封 { code, msg, data }，code === 0 表示成功，进程退出码与之对应。
  *
  * 支持的命令：
- *   lark auth status              查看认证状态
+ *   lark --version                安装检测（退出码 0 即已安装）
+ *   lark auth status              登录状态（输出 { ok, verified, ... }）
  *   lark doc list                 列出可访问文档
  *   lark doc get <url|token>      获取文档（标题 + Markdown 正文）
  *   lark doc search <keyword>     按关键词搜索文档
@@ -44,9 +46,11 @@ function loadDoc(token) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-function out(envelope) {
-  process.stdout.write(JSON.stringify(envelope, null, 2) + "\n");
-  process.exit(envelope.code === 0 ? 0 : 1);
+function out(result) {
+  process.stdout.write(JSON.stringify(result, null, 2) + "\n");
+  // 信封形状按 code 判定，auth status 的 { ok, verified } 形状按 ok 判定
+  const success = result.code !== undefined ? result.code === 0 : result.ok === true;
+  process.exit(success ? 0 : 1);
 }
 
 async function main() {
@@ -54,29 +58,31 @@ async function main() {
   const [cmd, sub, ...rest] = args;
   await sleep(150 + Math.floor(Math.random() * 250)); // 模拟网络往返延迟
 
+  if (cmd === "--version" || cmd === "-v") {
+    return out({ code: 0, msg: "success", data: { name: "lark-cli（演示 mock）", version: "1.0.0" } });
+  }
+
   if (!cmd || cmd === "--help" || cmd === "-h") {
     return out({
       code: 0,
       msg: "success",
       data: {
         usage: "lark <command> <subcommand> [args]",
-        commands: ["auth status", "doc list", "doc get <url|token>", "doc search <keyword>"],
+        commands: ["--version", "auth status", "doc list", "doc get <url|token>", "doc search <keyword>"],
         note: "本 CLI 为模拟实现，文档数据来自 mock-data/ 目录",
       },
     });
   }
 
   if (cmd === "auth" && sub === "status") {
+    // 与真实 lark-cli 对齐：--json --verify 输出顶层 { ok, verified, ... }，verified 表示 token 有效
     return out({
-      code: 0,
-      msg: "success",
-      data: {
-        status: "ok",
-        tenant: "模拟租户（demo）",
-        app_id: "cli_mock_demo",
-        account: "demo@larksuite.com",
-        token_expires_in: 3500,
-      },
+      ok: true,
+      verified: true,
+      tenant: "模拟租户（demo）",
+      app_id: "cli_mock_demo",
+      account: "demo@larksuite.com",
+      token_expires_in: 3500,
     });
   }
 
