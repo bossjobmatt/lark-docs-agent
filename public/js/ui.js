@@ -27,6 +27,28 @@ export function toolChipsEl(toolCalls) {
   return tools;
 }
 
+/**
+ * 剪贴板写入：Clipboard API 仅安全上下文（HTTPS / localhost）可用，
+ * 局域网 http 访问时 navigator.clipboard 为 undefined，需回退 execCommand 方案
+ */
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.cssText = "position:fixed;top:-9999px;left:-9999px;opacity:0";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  try {
+    if (!document.execCommand("copy")) throw new Error("execCommand copy rejected");
+  } finally {
+    ta.remove();
+  }
+}
+
 /** 单条消息卡片（历史恢复、流式 done 替换、欢迎页共用） */
 export function renderMessage(m) {
   const wrap = el("div", `msg ${m.role}`);
@@ -72,7 +94,7 @@ export function renderMessage(m) {
     copyBtn.textContent = "⧉ 复制";
     copyBtn.addEventListener("click", async () => {
       try {
-        await navigator.clipboard.writeText(m.content);
+        await copyText(m.content);
         copyBtn.textContent = "✓ 已复制";
       } catch {
         copyBtn.textContent = "复制失败";
