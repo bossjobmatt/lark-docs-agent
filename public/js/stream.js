@@ -14,7 +14,7 @@ export function abortStream() {
   if (streamAbort) streamAbort.abort();
 }
 
-function sendStreaming(text, typing, stageHint) {
+function sendStreaming(text, typing, stageHint, images = []) {
   streamAbort = new AbortController();
   let userAborted = false;
   streamAbort.signal.addEventListener("abort", () => (userAborted = true), { once: true });
@@ -23,7 +23,7 @@ function sendStreaming(text, typing, stageHint) {
     const resp = await fetch("/api/chat/stream", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId: state.sessionId, message: text }),
+      body: JSON.stringify({ sessionId: state.sessionId, message: text, images }),
       signal: streamAbort.signal,
     });
     if (!resp.ok || !(resp.headers.get("content-type") || "").includes("ndjson")) {

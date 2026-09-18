@@ -7,6 +7,7 @@ const llm = require("./llm");
 const llmConfig = require("./llm-config");
 const piAgent = require("./pi-agent");
 const { runLarkCli, cliStatus } = require("./lark");
+const { normalizeImages, bodyLimit } = require("./images");
 const protocol = require("./protocol");
 
 const PORT = Number(process.env.PORT) || 3737;
@@ -127,13 +128,19 @@ const server = http.createServer(async (req, res) => {
 
     // 发送消息（核心接口，响应已瘦身：前端本地维护消息列表，不再回传全量 history）
     if (req.method === "POST" && url.pathname === "/api/chat") {
-      const body = JSON.parse((await readBody(req)) || "{}");
+      const body = JSON.parse((await readBody(req, bodyLimit())) || "{}");
       const message = String(body.message || "").trim();
-      if (!message) return send(res, 400, { error: "message 不能为空" });
+      let images;
+      try {
+        images = normalizeImages(body.images);
+      } catch (e) {
+        return send(res, 400, { error: e.message });
+      }
+      if (!message && !images.length) return send(res, 400, { error: "message 或 images 至少其一不能为空" });
 
       const session = store.getOrCreate(body.sessionId);
       const t0 = Date.now();
-      const reply = await agent.handle(message, session);
+      const reply = await agent.handle(message, session, { images });
       console.log(`[chat] sid=${session.id.slice(0, 8)} mode=${reply.mode} ${Date.now() - t0}ms`);
       return send(res, 200, {
         sessionId: session.id,
@@ -144,9 +151,15 @@ const server = http.createServer(async (req, res) => {
 
     // 发送消息（流式：NDJSON 事件行 —— start / tool / delta / done / error）
     if (req.method === "POST" && url.pathname === "/api/chat/stream") {
-      const body = JSON.parse((await readBody(req)) || "{}");
+      const body = JSON.parse((await readBody(req, bodyLimit())) || "{}");
       const message = String(body.message || "").trim();
-      if (!message) return send(res, 400, { error: "message 不能为空" });
+      let images;
+      try {
+        images = normalizeImages(body.images);
+      } catch (e) {
+        return send(res, 400, { error: e.message });
+      }
+      if (!message && !images.length) return send(res, 400, { error: "message 或 images 至少其一不能为空" });
 
       const session = store.getOrCreate(body.sessionId);
       res.writeHead(200, {
@@ -167,7 +180,7 @@ const server = http.createServer(async (req, res) => {
 
       const t0 = Date.now();
       try {
-        const reply = await agent.handle(message, session, { onEvent: writeEvent, signal: ac.signal });
+        const reply = await agent.handle(message, session, { onEvent: writeEvent, signal: ac.signal, images });
         console.log(`[chat/stream] sid=${session.id.slice(0, 8)} mode=${reply.mode} ${Date.now() - t0}ms`);
         writeEvent(protocol.doneEvent(session.id, reply));
       } catch (e) {

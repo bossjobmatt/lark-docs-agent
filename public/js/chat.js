@@ -4,6 +4,7 @@ import { state } from "./state.js";
 import { post } from "./api.js";
 import { sendStreaming, abortStream } from "./stream.js";
 import { enterChat, enterWelcome } from "./welcome.js";
+import { count as attachCount, take as takeAttachments } from "./attach.js";
 
 const chatEl = document.getElementById("chat");
 const form = document.getElementById("composer");
@@ -29,10 +30,10 @@ export function refresh(history) {
   scrollBottom(true);
 }
 
-async function handleSend(text) {
+async function handleSend(text, images = takeAttachments()) {
   enterChat(); // 首条消息发出即从居中欢迎态切回吸底输入
   setBusy(true);
-  chatEl.appendChild(renderMessage({ role: "user", content: text }));
+  chatEl.appendChild(renderMessage({ role: "user", content: text, images }));
   const typing = el("div", "typing");
   typing.textContent = "Agent 处理中（提取链接 → 调用 Lark CLI → 生成回复）";
   chatEl.appendChild(typing);
@@ -57,7 +58,7 @@ async function handleSend(text) {
   };
 
   try {
-    await sendStreaming(text, typing, stageHint);
+    await sendStreaming(text, typing, stageHint, images);
   } catch (e) {
     typing.remove();
     const errWrap = el("div", "msg assistant");
@@ -67,7 +68,7 @@ async function handleSend(text) {
     retry.textContent = "↻ 重试这条消息";
     retry.addEventListener("click", () => {
       retry.closest(".msg").remove();
-      handleSend(text);
+      handleSend(text, images); // 连同图片一起重发
     });
     errWrap.appendChild(retry);
     chatEl.appendChild(errWrap);
@@ -87,7 +88,7 @@ form.addEventListener("submit", (e) => {
     return;
   }
   const text = input.value.trim();
-  if (!text) return;
+  if (!text && !attachCount()) return; // 允许纯图片消息
   input.value = "";
   input.style.height = "auto";
   handleSend(text);

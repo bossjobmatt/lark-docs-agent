@@ -11,6 +11,8 @@ const PIECE_DELAY = Number(process.env.MOCK_PIECE_DELAY_MS) || 30;
 
 const TEXT_PIECES = ["已读取文档《上线方案》。", "**里程碑**：阶段一已完成，", "阶段二进行中，预计下周评审。"];
 
+let lastChatBodies = []; // 最近若干次 /v1/chat/completions 请求体（GET /v1/debug/last-body 回放；标题生成等后台请求会追加，测试按需筛选）
+
 function nowSec() {
   return Math.floor(Date.now() / 1000);
 }
@@ -62,7 +64,15 @@ const server = http.createServer((req, res) => {
       return res.end(JSON.stringify({ data: [{ id: "mock-model" }, { id: "mock-mini" }] }));
     }
 
+    // 测试辅助：回放最近若干次 /v1/chat/completions 请求体（断言多模态组装用）
+    if (req.url === "/v1/debug/last-body") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ bodies: lastChatBodies }));
+    }
+
     if (req.url === "/v1/chat/completions") {
+      lastChatBodies.push(b);
+      if (lastChatBodies.length > 20) lastChatBodies.shift();
       if (!b.stream) {
         res.writeHead(200, { "Content-Type": "application/json" });
         return res.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: TEXT_PIECES.join("") } }] }));

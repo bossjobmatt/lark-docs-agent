@@ -25,12 +25,15 @@
 
   <div class="composer-wrap">
     <div id="welcome-hero" class="welcome-hero hidden"></div>
+    <div id="attach-strip" class="attach-strip hidden"></div>
     <form id="composer" class="composer">
+      <button type="button" id="attach-btn" class="attach-btn" title="插入图片（也可直接粘贴截图）">📎</button>
       <textarea id="input" rows="3"
         placeholder="输入问题，可附带飞书/Lark 文档链接"></textarea>
       <button id="send" type="submit">发送</button>
     </form>
-    <div class="composer-hint">Enter 发送 · Shift+Enter 换行</div>
+    <input id="attach-file" type="file" accept="image/png,image/jpeg,image/webp" multiple class="hidden" />
+    <div class="composer-hint">Enter 发送 · Shift+Enter 换行 · 可粘贴或点击 📎 插入图片</div>
   </div>
 
   <div id="llm-modal" class="modal hidden">

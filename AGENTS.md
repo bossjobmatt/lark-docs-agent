@@ -40,6 +40,7 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 | `protocol.js` | 事件工厂 + `makeReply` | 流式事件与回复对象的**唯一契约** |
 | `lark.js` | `runLarkCli/runLarkCommand/cliStatus` | lark CLI 纯调用：两步直查检测（① `--version` 退出码 0 判安装 → ② `auth status --json --verify` 按 verified 证据判登录，兼容真实 lark-cli 无 `ok` 字段的输出）；执行面不做子命令限制/命令面适配——`runLarkCli` 信封解析（确定性路径），`runLarkCommand` 原始透传（agent 通用工具）；LARK_CLI 显式指定优先，否则直接执行 PATH 中的 `lark-cli`，不做安装位置兜底；成功永久缓存，失败按 LARK_PROBE_RETRY_MS 短 TTL 重试 |
 | `markdown.js` | `renderMarkdown` | marked + 轻量消毒（去 script/iframe/内联事件） |
+| `images.js` | `normalizeImages/bodyLimit` | 图片附件校验：mime 白名单、数量（3）与解码后大小上限（`IMAGE_MAX_KB`，默认 4096KB）；供 chat 系列路由调用 |
 
 前端（`public/`，原生 ES modules，无打包器）：
 
@@ -52,6 +53,7 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 | `js/health.js` | 模式徽标与健康检查 |
 | `js/chat.js` | 聊天主界面：消息流管理、发送入口、输入区与清空 |
 | `js/welcome.js` | 欢迎态布局：新会话 Hero+输入框垂直居中（`body.welcome`），会话开始后切回吸底输入（enterWelcome/enterChat） |
+| `js/attach.js` | 图片附件：粘贴/选择 → 降采样（超 2000px 转 JPEG）→ 预览条；发送时由 chat.js `take()` 取走并清空 |
 | `js/stream.js` | 流式发送：NDJSON 事件解析、流式增量渲染（稳定前缀+活跃尾行）、生成中止 |
 | `js/sessions.js` | 会话面板（列表/切换/新建/删除） |
 | `js/llm-modal.js` | AI 引擎配置弹窗 |
@@ -63,7 +65,7 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 2. **流式事件契约只在 `protocol.js`**：五种事件 `start/tool/delta/done/error`。新增事件类型只改 protocol.js + `public/app.js`（前端为文档化消费者），不许在其他文件手拼事件对象。
 3. **lark CLI 契约**：检测两步直查——`--version` 退出码 0 判安装；`auth status --json --verify` 按 **verified 证据**判登录（顶层 `verified === true` 即已登录，兼容真实 lark-cli 顶层 `{ appId, brand, identities, ... }` 无 `ok` 字段的形态，identities 中存在已验证身份亦可；显式 `ok === false` / `verified === false` 一票否决；信封 `{ code: 0 }` 不算已登录）。执行面**不做子命令限制、不做命令面适配**：doc 类信封 `{ code, msg, data }`（code 0 成功，约定子命令 `doc list` / `doc get <url|token>` / `doc search <kw>`）仅是输出解读约定；真实 CLI 命令面不同（如 `docs fetch`）由 pi agent 的通用 `lark_cli` 工具自行探索。未检测到 CLI 时返回友好引导信封（不执行任何命令）。
 4. **上下文预算**：LLM 输入受 `CONTEXT_BUDGET_CHARS`（默认 24000 字符）约束；超 `DOC_FULL_TEXT_MAX`（8000）的文档按问题节选 top-k 章节 + 大纲；超限类错误先裁剪最早缓存文档自愈一次。
-5. **落盘瘦身**：sessions.json 为紧凑 JSON，仅存 Markdown 原文——**html 渲染结果不落盘**（加载时现算），**docs 文档缓存只在内存**。新增字段要考虑是否落盘。
+5. **落盘瘦身**：sessions.json 为紧凑 JSON，仅存 Markdown 原文——**html 渲染结果不落盘**（加载时现算），**docs 文档缓存只在内存**，**消息图片（images）只在内存**（落盘剥离，刷新后历史不回显图片）。新增字段要考虑是否落盘。
 
 ## 测试
 
@@ -82,6 +84,7 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 | `SESSIONS_FILE` / `LLM_CONFIG_FILE` | `data/` 下 | **测试用**落盘覆盖 |
 | `SESSION_TTL_DAYS` / `SESSION_MAX_COUNT` / `SESSION_MAX_MESSAGES` | 7 / 100 / 50 | 会话淘汰（显式 0 生效） |
 | `CONTEXT_BUDGET_CHARS` / `DOC_FULL_TEXT_MAX` | 24000 / 8000 | LLM 上下文预算 |
+| `IMAGE_MAX_KB` | 4096 | 单张图片解码后大小上限（前端按 4MB 预校验，服务端为权威） |
 | `AGENT_MODE` | `pi` | 默认 Agent 模式（显式 `builtin` 切回） |
 | `PI_AGENT_DIR` / `PI_PROMPT_TIMEOUT_MS` | `data/pi-agent/` / 120000 | pi 模式 |
 | `LARK_FAIL_RATE` | 0 | 演示 mock 的失败注入 |

@@ -118,6 +118,7 @@ npm run lark -- doc search 上线                 # 关键词搜索
 - **存储瘦身与淘汰**：落盘为紧凑 JSON，只存 Markdown 原文（html 渲染结果不落盘，加载时按原文现算；docs 文档缓存不落盘）；会话自动淘汰——默认 7 天不活跃（`SESSION_TTL_DAYS`，显式 0 生效）或总数超过 100 个（`SESSION_MAX_COUNT`）即删，每会话仅保留最近 50 条消息（`SESSION_MAX_MESSAGES`）。
 - **上下文预算与选段**：LLM 输入按字符预算控制（默认 24000，`CONTEXT_BUDGET_CHARS` 可调）；超过 8000 字（`DOC_FULL_TEXT_MAX` 可调）的文档不再整篇进上下文，改为按问题相关度节选 top-k 章节 + 全文大纲；超限类失败先裁剪最早缓存文档自愈重试一次，仍失败才降级模拟。
 - **会话管理**：页头「🗂 会话」面板列出全部历史会话（按最近活跃排序），支持切换、新建、删除；匿名新对话自动创建新会话。标题在首轮回复后由 LLM 自动生成（12 字内短标题；未配置 LLM 或生成失败时回落首条消息截断）。
+- **图片问答**：输入框支持粘贴/点击 📎/拖入图片（PNG/JPEG/WebP，单张默认 ≤4MB 可用 `IMAGE_MAX_KB` 调整，单条最多 3 张，超长边自动降采样为 JPEG）。图片随消息发给支持视觉的 LLM（内置编排模式组装 OpenAI 多模态 content，pi 模式走 SDK 原生图片附件）；模拟模式无法识图，会回复引导文案。图片仅在内存有效：落盘时剥离，刷新/重启后历史消息只保留文本。
 - **Markdown 渲染**：服务端用 `marked` 转 HTML 并做轻量消毒（去 `<script>`/`<iframe>`/内联事件）；前端 vendored 同版本 marked（`public/vendor/`，无打包步骤）用于**流式期间的增量渲染**，最终渲染仍以服务端结果为准。
 
 ## API 一览
@@ -127,8 +128,8 @@ npm run lark -- doc search 上线                 # 关键词搜索
 | GET | `/api/health` | 健康检查与模式探测（sim / llm，含当前模型与接口类型） |
 | GET | `/api/examples` | 示例文档列表（真实经 CLI `doc list` 取得） |
 | GET | `/api/history?sessionId=` | 取会话历史 |
-| POST | `/api/chat` | `{ sessionId?, message }` → 瘦身响应：`{ sessionId, mode, message }`（前端本地维护列表，不再回传全量 history） |
-| POST | `/api/chat/stream` | 流式对话：NDJSON 事件行（`start` / `tool` / `delta` / `done` / `error`），`done` 携带完整回复（含渲染 HTML） |
+| POST | `/api/chat` | `{ sessionId?, message, images? }` → 瘦身响应：`{ sessionId, mode, message }`（前端本地维护列表，不再回传全量 history） |
+| POST | `/api/chat/stream` | 流式对话：NDJSON 事件行（`start` / `tool` / `delta` / `done` / `error`），`done` 携带完整回复（含渲染 HTML）；请求体同 `/api/chat` |
 | GET | `/api/sessions` | 会话列表（按最近活跃倒序，含标题/条数，供会话管理面板） |
 | POST | `/api/session/clear` | 清空会话 |
 | POST | `/api/session/delete` | 删除会话（同时销毁 pi Agent 会话记忆） |

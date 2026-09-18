@@ -92,7 +92,8 @@ function persist() {
         createdAt: s.createdAt,
         updatedAt: s.updatedAt,
         ...(s.title ? { title: s.title } : {}), // LLM 生成的标题（有才存，旧文件保持无该字段）
-        messages: s.messages.map(({ html, ...rest }) => rest), // html 不落盘
+        // html 不落盘；images（图片 base64）同样只在内存——落盘仅存 Markdown 原文，图片刷新后不回显
+        messages: s.messages.map(({ html, images, ...rest }) => rest),
       }));
       fs.writeFileSync(DATA_FILE, JSON.stringify(slim)); // 紧凑存储，不带缩进
     } catch (e) {

@@ -186,7 +186,7 @@ function withTimeout(promise, ms, label) {
  * pi 上游请求（与 PROMPT_TIMEOUT_MS 超时走同一条 abort 路径）。
  * 返回完整回复对象（makeReply 结构）；失败抛错，由上层降级。
  */
-async function run(message, sessionId, { onEvent, signal } = {}) {
+async function run(message, sessionId, { onEvent, signal, images = [] } = {}) {
   const pi = await loadPi();
   if (!pi) throw new Error("pi SDK 未安装（npm i @earendil-works/pi-coding-agent）");
 
@@ -207,7 +207,10 @@ async function run(message, sessionId, { onEvent, signal } = {}) {
     };
     if (signal) signal.addEventListener("abort", onAbort, { once: true });
     try {
-      await withTimeout(entry.session.prompt(message), PROMPT_TIMEOUT_MS, "pi 处理超时");
+      // 图片走 SDK 原生附件通道（ImageContent: { type:"image", data: base64, mimeType }）；纯图片消息补一段引导文本
+      const promptText = message || "请分析这些图片";
+      const opts = images.length ? { images: images.map((im) => ({ type: "image", data: im.data, mimeType: im.mime })) } : undefined;
+      await withTimeout(entry.session.prompt(promptText, opts), PROMPT_TIMEOUT_MS, "pi 处理超时");
     } catch (e) {
       try {
         await entry.session.abort();

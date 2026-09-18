@@ -3,6 +3,7 @@ const llm = require("./llm");
 const llmConfig = require("./llm-config");
 const piAgent = require("./pi-agent");
 const store = require("./store");
+const { toUserContent } = require("./images");
 const { makeReply, nowTs, toolEmitter, deltaEvent } = require("./protocol");
 
 // 从用户消息中提取飞书/Lark 文档标识：完整链接，或 doccn 开头的裸 token
@@ -111,10 +112,13 @@ function isOverflowError(e) {
 }
 
 /** 无 LLM 时的本地模拟回复：证明「取文档→回答」链路可用 */
-function buildSimReply(question, session) {
+function buildSimReply(question, session, images = []) {
   const docs = Object.values(session.docs);
 
   if (!docs.length) {
+    const imgNote = images.length
+      ? "\n\n🖼 检测到你发送了图片：模拟模式无法识图，配置支持视觉的 LLM（如 gpt-4o / GLM-4.5V）后即可图片问答。"
+      : "";
     return [
       "你好！我是 **Lark 文档助手** 🤖，当前为**模拟模式**（未配置大模型 Key，回复由本地规则生成，用于演示完整链路）。",
       "",
@@ -126,6 +130,7 @@ function buildSimReply(question, session) {
       "试试：`帮我总结这份文档：https://demo.feishu.cn/docx/doccnABC123xyz`",
       "",
       "💡 配置 `LLM_API_KEY`（OpenAI 兼容）并重启服务，可获得真正的 AI 问答效果。",
+      imgNote,
     ].join("\n");
   }
 
@@ -133,6 +138,9 @@ function buildSimReply(question, session) {
     `已读取 **${docs.length}** 篇文档（当前为**模拟模式**，回答由本地规则匹配生成，仅供演示链路）：`,
     "",
   ];
+  if (images.length) {
+    parts.push(`🖼 检测到 ${images.length} 张图片：模拟模式无法识图，已忽略图片内容。`, "");
+  }
   let anyMatch = false;
 
   for (const doc of docs) {
@@ -170,8 +178,15 @@ function buildSimReply(question, session) {
   return parts.join("\n");
 }
 
+/** 消息长度估算：字符串取长度，多模态数组只累计文本部分（图片不计入字符预算） */
+function contentLen(c) {
+  if (typeof c === "string") return c.length;
+  if (Array.isArray(c)) return c.reduce((n, p) => n + (p && typeof p.text === "string" ? p.text.length : 0), 0);
+  return 0;
+}
+
 /** LLM 模式：文档（长文档按问题节选）+ 预算内的最近对话一起交给模型；提供 onDelta 时走流式 */
-async function askLlm(question, session, { onDelta, signal } = {}) {
+async function askLlm(question, session, { onDelta, signal, images = [] } = {}) {
   const docs = Object.values(session.docs);
   const perDocBudget = Math.max(2000, Math.floor((CONTEXT_BUDGET_CHARS * 0.6) / Math.max(1, docs.length)));
   const docBlocks = docs.map((d) => docBlock(d, question, perDocBudget)).join("\n\n---\n\n");
@@ -185,12 +200,13 @@ async function askLlm(question, session, { onDelta, signal } = {}) {
     "3. 始终用中文回答。",
   ].join("\n");
 
-  // 总量超预算时从最旧历史开始丢（文档块优先保留），保底保留最近 2 条
+  // 总量超预算时从最旧历史开始丢（文档块优先保留），保底保留最近 2 条。
+  // 历史中的图片不重发（避免每轮放大请求）：仅本轮消息携带图片，历史图片消息回落为纯文本。
   let kept = session.messages
     .filter((m) => m.role === "user" || m.role === "assistant")
     .slice(-12)
-    .map((m) => ({ role: m.role, content: m.content }));
-  const totalLen = () => system.length + docBlocks.length + kept.reduce((n, m) => n + m.content.length, 0);
+    .map((m) => ({ role: m.role, content: m.content || (m.images && m.images.length ? "（图片）" : m.content) }));
+  const totalLen = () => system.length + docBlocks.length + kept.reduce((n, m) => n + contentLen(m.content), 0);
   while (kept.length > 2 && totalLen() > CONTEXT_BUDGET_CHARS) kept = kept.slice(1);
 
   const messages = [
@@ -198,6 +214,17 @@ async function askLlm(question, session, { onDelta, signal } = {}) {
     ...(docBlocks ? [{ role: "system", content: `以下是已读取的文档内容：\n\n${docBlocks}` }] : []),
     ...kept,
   ];
+
+  // 本轮带图片：把最后一条 user 消息（即当前输入）升级为多模态 content（组装逻辑见 images.js）
+  if (images.length) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === "user") {
+        messages[i].content = toUserContent(question, images);
+        break;
+      }
+    }
+  }
+
   if (onDelta) return llm.chatStream(messages, { onDelta, signal });
   return llm.chat(messages, { signal });
 }
@@ -215,7 +242,7 @@ async function fakeStream(content, onEvent) {
  * 内置编排模式：服务端预取文档 → LLM/模拟规则回答。
  * 提供 onEvent 时逐段回调流式事件（契约见 protocol.js）；返回完整回复对象（不写入会话）。
  */
-async function builtinCore(message, session, { onEvent, signal } = {}) {
+async function builtinCore(message, session, { onEvent, signal, images = [] } = {}) {
   // 1) 工具调用：读取文档（带会话级缓存）
   const toolCalls = [];
   const emitTools = toolEmitter(onEvent, toolCalls);
@@ -253,6 +280,7 @@ async function builtinCore(message, session, { onEvent, signal } = {}) {
       askLlm(message, session, {
         onDelta: onEvent && ((text) => onEvent(deltaEvent(text))),
         signal,
+        images,
       });
     try {
       content = await runLlm();
@@ -269,12 +297,12 @@ async function builtinCore(message, session, { onEvent, signal } = {}) {
         }
       }
       if (mode !== "llm") {
-        content = `> ⚠️ LLM 调用失败（${e.message}），已降级为本地模拟回复。\n\n` + buildSimReply(message, session);
+        content = `> ⚠️ LLM 调用失败（${e.message}），已降级为本地模拟回复。\n\n` + buildSimReply(message, session, images);
         if (onEvent) await fakeStream(content, onEvent);
       }
     }
   } else {
-    content = buildSimReply(message, session);
+    content = buildSimReply(message, session, images);
     if (onEvent) await fakeStream(content, onEvent);
   }
 
@@ -296,7 +324,7 @@ function maybeGenerateTitle(session) {
   llm.chat(
     [
       { role: "system", content: "为用户消息生成一个不超过 12 字的中文会话标题。直接输出标题文本，不要引号、句号或任何前缀说明。" },
-      { role: "user", content: String(firstUser.content).slice(0, 300) },
+      { role: "user", content: String(firstUser.content || "图片提问").slice(0, 300) },
     ],
     { timeoutMs: 10000 }
   )
@@ -307,20 +335,22 @@ function maybeGenerateTitle(session) {
     .catch(() => {});
 }
 
-async function handle(message, session, { onEvent, signal } = {}) {
-  store.appendMessages(session.id, [{ role: "user", content: message, ts: nowTs() }]);
+async function handle(message, session, { onEvent, signal, images = [] } = {}) {
+  const userMsg = { role: "user", content: message, ts: nowTs() };
+  if (images.length) userMsg.images = images; // 图片仅内存（落盘时剥离，见 store.persist），刷新后不回显
+  store.appendMessages(session.id, [userMsg]);
 
   let reply;
   if (llmConfig.publicConfig().agentMode === "pi") {
     try {
-      reply = await piAgent.run(message, session.id, { onEvent, signal });
+      reply = await piAgent.run(message, session.id, { onEvent, signal, images });
     } catch (e) {
-      const base = await builtinCore(message, session, { onEvent, signal });
+      const base = await builtinCore(message, session, { onEvent, signal, images });
       const note = `> ⚠️ pi Agent 调用失败（${e.message}），已降级为内置模式。\n\n`;
       reply = makeReply(note + base.content, { mode: base.mode, toolCalls: base.toolCalls });
     }
   } else {
-    reply = await builtinCore(message, session, { onEvent, signal });
+    reply = await builtinCore(message, session, { onEvent, signal, images });
   }
 
   store.appendMessages(session.id, [reply]);

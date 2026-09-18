@@ -32,6 +32,18 @@ export function renderMessage(m) {
     wrap.appendChild(ts);
   }
 
+  if (m.images && m.images.length) {
+    // 用户消息随附图片：气泡上方的缩略图条（图片仅内存，历史恢复后无此字段）
+    const strip = el("div", "msg-images");
+    for (const im of m.images) {
+      const img = document.createElement("img");
+      img.src = `data:${im.mime};base64,${im.data}`;
+      img.alt = im.name || "图片";
+      strip.appendChild(img);
+    }
+    wrap.appendChild(strip);
+  }
+
   if (m.toolCalls && m.toolCalls.length) {
     wrap.appendChild(toolChipsEl(m.toolCalls));
   }
