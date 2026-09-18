@@ -251,7 +251,8 @@ async function gateCommand() {
  * CLI 崩溃、输出非法 JSON、超时都会被兜住，不会让服务端抛异常。
  * 不限制子命令——信封只是输出解读约定，命令面由调用方决定。
  */
-async function runLarkCli(args, timeoutMs = 10000) {
+async function runLarkCli(args, timeoutMs = 60000) {
+  // 默认 60s：真实链路 = wiki 节点解析 + 全文拉取 + 偶发令牌刷新，10s 会误杀
   const gate = await gateCommand();
   if (!gate.ok) return gate;
   return runEnvelope(gate.path, args, timeoutMs);
