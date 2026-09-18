@@ -106,7 +106,10 @@ function writeOwnConfig(dir) {
     baseUrl: cfg.baseUrl,
     apiKey,
     authHeader: true,
-    models: [{ id: cfg.model, name: cfg.model }],
+    // 必须声明 input 含 image：pi 按 model.input 决定是否携带图片，缺失会被静默替换为
+    // "(image omitted: model does not support images)"（即使模型/网关实际支持视觉）。
+    // 纯文本模型发图会由网关报错提示，属预期行为。
+    models: [{ id: cfg.model, name: cfg.model, input: ["text", "image"] }],
   };
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "models.json"), JSON.stringify({ providers: { [providerId]: provider } }, null, 2));
