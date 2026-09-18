@@ -144,7 +144,9 @@ async function isLarkLoggedIn(cliPath) {
   }
   const status = parseJsonOutput(r.stdout);
   if (isLoginAccepted(status)) {
-    return { loggedIn: true, detail: "" };
+    // 顺带提取登录账号（真实 lark-cli 的 identities.user.userName），供 health 展示
+    const user = status && status.identities && !Array.isArray(status.identities) && status.identities.user;
+    return { loggedIn: true, detail: "", account: (user && user.userName) || "" };
   }
   const brief = status ? JSON.stringify(status) : (r.stdout || r.stderr).trim();
   return { loggedIn: false, detail: `${String(brief).slice(0, 160) || "无输出"}` };
@@ -177,7 +179,7 @@ async function probeResolve() {
       reason: `lark-cli 已安装但未通过登录检测（auth status --json --verify）：${login.detail}`,
     };
   }
-  return { available: true, source: okSource, path: cliPath };
+  return { available: true, source: okSource, path: cliPath, account: login.account || "" };
 }
 
 /** 解析并缓存结果：成功永久；失败短 TTL 后重探；并发调用共享同一次探测 */

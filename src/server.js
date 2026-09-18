@@ -74,7 +74,7 @@ const server = http.createServer(async (req, res) => {
         apiType: cfg.apiType,
         agentMode: cfg.agentMode,
         piAvailable: cfg.agentMode === "pi" ? await piAgent.isAvailable() : null,
-        lark: { available: lark.available, source: lark.source, path: lark.path, reason: lark.reason || null },
+        lark: { available: lark.available, source: lark.source, path: lark.path, reason: lark.reason || null, account: lark.account || null },
         time: new Date().toISOString(),
       });
     }
