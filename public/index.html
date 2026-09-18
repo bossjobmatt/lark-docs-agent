@@ -12,7 +12,7 @@
     <div class="brand">📄 Lark 文档助手 <span class="sub">本地服务 · AI Agent × Lark CLI</span></div>
     <div class="actions">
       <span id="badge-mode" class="badge">加载中…</span>
-      <span id="badge-lark" class="badge sim hidden" title="解析飞书/Lark 文档需要本地安装并认证 lark CLI（LARK_CLI 环境变量或 PATH 中的 lark）。检测失败后会自动重试，装好即恢复。">未检测到 lark CLI</span>
+      <span id="badge-lark" class="badge sim" title="lark CLI 连接状态">lark CLI 检测中…</span>
       <span id="badge-pi" class="badge sim hidden">pi SDK 未安装，将降级</span>
       <button id="sessions-btn" class="ghost" type="button">🗂 会话</button>
       <button id="llm-btn" class="ghost" type="button">⚙️ 配置 LLM</button>
@@ -29,10 +29,6 @@
         placeholder="输入问题，可附带飞书/Lark 文档链接（Enter 发送，Shift+Enter 换行）"></textarea>
       <button id="send" type="submit">发送</button>
     </form>
-    <footer class="tips" id="tips">
-      <span class="tips-label">示例文档（来自 lark doc list）：</span>
-      <span id="examples"></span>
-    </footer>
   </div>
 
   <div id="llm-modal" class="modal hidden">

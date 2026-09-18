@@ -48,6 +48,7 @@ body {
   border: 1px solid #c9dbff;
 }
 .badge.sim { background: #fff7e8; color: #b26a00; border-color: #f5dfb8; }
+.badge.ok { background: #eefaf0; color: #1a7f37; border-color: #c4e8cc; }
 
 .ghost {
   font-size: 12px;
@@ -231,29 +232,6 @@ pre.raw-md {
   cursor: pointer;
 }
 #send:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.tips {
-  max-width: 828px;
-  margin: 8px auto 0;
-  font-size: 12px;
-  color: var(--muted);
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  align-items: center;
-}
-.tips-label { white-space: nowrap; }
-
-.example-chip {
-  font-size: 12px;
-  padding: 3px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: #fff;
-  color: #4b5563;
-  cursor: pointer;
-}
-.example-chip:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ---------- LLM 配置弹窗 ---------- */
 .modal {

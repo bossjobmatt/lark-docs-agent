@@ -144,7 +144,9 @@ async function isLarkLoggedIn(cliPath) {
   }
   const status = parseJsonOutput(r.stdout);
   if (isLoginAccepted(status)) {
-    return { loggedIn: true, detail: "" };
+    // 顺带提取登录账号（真实 lark-cli 的 identities.user.userName），供 health 展示
+    const user = status && status.identities && !Array.isArray(status.identities) && status.identities.user;
+    return { loggedIn: true, detail: "", account: (user && user.userName) || "" };
   }
   const brief = status ? JSON.stringify(status) : (r.stdout || r.stderr).trim();
   return { loggedIn: false, detail: `${String(brief).slice(0, 160) || "无输出"}` };
@@ -177,7 +179,7 @@ async function probeResolve() {
       reason: `lark-cli 已安装但未通过登录检测（auth status --json --verify）：${login.detail}`,
     };
   }
-  return { available: true, source: okSource, path: cliPath };
+  return { available: true, source: okSource, path: cliPath, account: login.account || "" };
 }
 
 /** 解析并缓存结果：成功永久；失败短 TTL 后重探；并发调用共享同一次探测 */
@@ -249,7 +251,8 @@ async function gateCommand() {
  * CLI 崩溃、输出非法 JSON、超时都会被兜住，不会让服务端抛异常。
  * 不限制子命令——信封只是输出解读约定，命令面由调用方决定。
  */
-async function runLarkCli(args, timeoutMs = 10000) {
+async function runLarkCli(args, timeoutMs = 60000) {
+  // 默认 60s：真实链路 = wiki 节点解析 + 全文拉取 + 偶发令牌刷新，10s 会误杀
   const gate = await gateCommand();
   if (!gate.ok) return gate;
   return runEnvelope(gate.path, args, timeoutMs);
