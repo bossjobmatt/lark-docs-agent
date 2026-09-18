@@ -4,8 +4,10 @@
  * 非法输入抛错（消息面向用户，由路由层转为 400）。
  */
 const MAX_IMAGES = 3; // 与单条消息文档数上限一致
-const MAX_KB = Number(process.env.IMAGE_MAX_KB) || 4096; // 单张解码后大小上限
+// 单张解码后大小上限；显式 0 一律生效 = 禁用图片上传（与仓库「显式 0 生效」惯例一致），负数/非法值回落默认
+const MAX_KB = Number.isFinite(Number(process.env.IMAGE_MAX_KB)) ? Number(process.env.IMAGE_MAX_KB) : 4096;
 const MIME_WHITELIST = { "image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp" };
+const IMAGE_PROMPT = "请分析这些图片"; // 纯图片无文本时的统一引导语（内置编排与 pi 模式共用）
 
 /** 请求体上限：base64 膨胀约 4/3，再留 JSON 与文本余量 */
 function bodyLimit() {
@@ -37,8 +39,8 @@ function toUserContent(text, images) {
   if (!images || !images.length) return text;
   return [
     ...images.map((im) => ({ type: "image_url", image_url: { url: `data:${im.mime};base64,${im.data}` } })),
-    { type: "text", text: text || "请分析这些图片" },
+    { type: "text", text: text || IMAGE_PROMPT },
   ];
 }
 
-module.exports = { normalizeImages, bodyLimit, toUserContent, MAX_IMAGES, MAX_KB };
+module.exports = { normalizeImages, bodyLimit, toUserContent, IMAGE_PROMPT, MAX_IMAGES, MAX_KB };

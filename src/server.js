@@ -54,6 +54,26 @@ function readBody(req, limit = 1024 * 1024) {
   });
 }
 
+/** chat 系列路由共用的请求体解析：放宽上限读取 + 图片归一化校验；非法输入抛带 status 的错误（路由层转 400） */
+async function parseChatBody(req) {
+  const body = JSON.parse((await readBody(req, bodyLimit())) || "{}");
+  let images;
+  try {
+    images = normalizeImages(body.images);
+  } catch (e) {
+    const err = new Error(e.message);
+    err.status = 400;
+    throw err;
+  }
+  const message = String(body.message || "").trim();
+  if (!message && !images.length) {
+    const err = new Error("message 或 images 至少其一不能为空");
+    err.status = 400;
+    throw err;
+  }
+  return { message, images, sessionId: body.sessionId };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
   try {
@@ -128,17 +148,14 @@ const server = http.createServer(async (req, res) => {
 
     // 发送消息（核心接口，响应已瘦身：前端本地维护消息列表，不再回传全量 history）
     if (req.method === "POST" && url.pathname === "/api/chat") {
-      const body = JSON.parse((await readBody(req, bodyLimit())) || "{}");
-      const message = String(body.message || "").trim();
-      let images;
+      let message, images, sessionId;
       try {
-        images = normalizeImages(body.images);
+        ({ message, images, sessionId } = await parseChatBody(req));
       } catch (e) {
-        return send(res, 400, { error: e.message });
+        return send(res, e.status || 400, { error: e.message });
       }
-      if (!message && !images.length) return send(res, 400, { error: "message 或 images 至少其一不能为空" });
 
-      const session = store.getOrCreate(body.sessionId);
+      const session = store.getOrCreate(sessionId);
       const t0 = Date.now();
       const reply = await agent.handle(message, session, { images });
       console.log(`[chat] sid=${session.id.slice(0, 8)} mode=${reply.mode} ${Date.now() - t0}ms`);
@@ -151,17 +168,14 @@ const server = http.createServer(async (req, res) => {
 
     // 发送消息（流式：NDJSON 事件行 —— start / tool / delta / done / error）
     if (req.method === "POST" && url.pathname === "/api/chat/stream") {
-      const body = JSON.parse((await readBody(req, bodyLimit())) || "{}");
-      const message = String(body.message || "").trim();
-      let images;
+      let message, images, sessionId;
       try {
-        images = normalizeImages(body.images);
+        ({ message, images, sessionId } = await parseChatBody(req));
       } catch (e) {
-        return send(res, 400, { error: e.message });
+        return send(res, e.status || 400, { error: e.message });
       }
-      if (!message && !images.length) return send(res, 400, { error: "message 或 images 至少其一不能为空" });
 
-      const session = store.getOrCreate(body.sessionId);
+      const session = store.getOrCreate(sessionId);
       res.writeHead(200, {
         "Content-Type": "application/x-ndjson; charset=utf-8",
         "Cache-Control": "no-store",

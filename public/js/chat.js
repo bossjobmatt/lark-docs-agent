@@ -30,7 +30,7 @@ export function refresh(history) {
   scrollBottom(true);
 }
 
-async function handleSend(text, images = takeAttachments()) {
+async function handleSend(text, images) {
   enterChat(); // 首条消息发出即从居中欢迎态切回吸底输入
   setBusy(true);
   chatEl.appendChild(renderMessage({ role: "user", content: text, images }));
@@ -91,7 +91,7 @@ form.addEventListener("submit", (e) => {
   if (!text && !attachCount()) return; // 允许纯图片消息
   input.value = "";
   input.style.height = "auto";
-  handleSend(text);
+  handleSend(text, takeAttachments()); // 显式取走附件（含清空预览条）
 });
 
 input.addEventListener("keydown", (e) => {

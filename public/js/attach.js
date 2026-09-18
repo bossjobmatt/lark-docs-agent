@@ -1,4 +1,5 @@
 /** 图片附件：粘贴/选择 → 校验与降采样 → 预览条；发送时由 chat.js 取走并清空 */
+import { dataUrl } from "./ui.js";
 
 const MAX_IMAGES = 3;
 const MAX_BYTES = 4 * 1024 * 1024; // 与服务端 IMAGE_MAX_KB 默认值一致，服务端为最终权威
@@ -52,8 +53,9 @@ function readAsBase64(file) {
   });
 }
 
-/** 处理单个图片文件：格式校验 → 超长边经 canvas 缩小并转 JPEG → 大小校验 → 入列 */
+/** 处理单个图片文件：数量/格式校验 → 超长边经 canvas 缩小并转 JPEG → 大小校验 → 入列 */
 async function addFile(file, idx) {
+  if (attachments.length >= MAX_IMAGES) return alert(`图片最多 ${MAX_IMAGES} 张`);
   if (!MIME_OK.has(file.type)) return alert(`第 ${idx} 张图片格式不支持（仅支持 PNG / JPEG / WebP）`);
   let blob = file;
   let mime = file.type;
@@ -79,11 +81,10 @@ async function addFile(file, idx) {
   }
 
   if (blob.size > MAX_BYTES) return alert(`第 ${idx} 张图片超过 4MB 上限，请裁剪后重试`);
-  if (attachments.length >= MAX_IMAGES) return alert(`图片最多 ${MAX_IMAGES} 张`);
   try {
     const data = await readAsBase64(blob);
     if (!data) return alert(`第 ${idx} 张图片读取失败`);
-    attachments.push({ mime, data, name, url: `data:${mime};base64,${data}` });
+    attachments.push({ mime, data, name, url: dataUrl({ mime, data }) });
     render();
   } catch {
     alert(`第 ${idx} 张图片读取失败`);

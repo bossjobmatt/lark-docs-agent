@@ -11,6 +11,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const llmConfig = require("./llm-config");
+const { IMAGE_PROMPT } = require("./images");
 const { TOOL_NAME, CLI_TOOL_NAME, makeLarkTools } = require("./pi-lark-tools");
 const { makeReply, toolEmitter, deltaEvent } = require("./protocol");
 
@@ -208,7 +209,7 @@ async function run(message, sessionId, { onEvent, signal, images = [] } = {}) {
     if (signal) signal.addEventListener("abort", onAbort, { once: true });
     try {
       // 图片走 SDK 原生附件通道（ImageContent: { type:"image", data: base64, mimeType }）；纯图片消息补一段引导文本
-      const promptText = message || "请分析这些图片";
+      const promptText = message || IMAGE_PROMPT;
       const opts = images.length ? { images: images.map((im) => ({ type: "image", data: im.data, mimeType: im.mime })) } : undefined;
       await withTimeout(entry.session.prompt(promptText, opts), PROMPT_TIMEOUT_MS, "pi 处理超时");
     } catch (e) {

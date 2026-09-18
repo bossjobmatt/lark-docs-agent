@@ -1,7 +1,8 @@
-/** agent.js 纯函数测试：链接提取、章节切分与选段、超限识别 */
+/** agent.js 纯函数测试：链接提取、章节切分与选段、超限识别（章节匹配现居 sim-reply.js） */
 const test = require("node:test");
 const assert = require("node:assert");
-const { extractTokens, splitSections, sectionScore, docExcerpt, isOverflowError } = require("../src/agent");
+const { extractTokens, docExcerpt, isOverflowError } = require("../src/agent");
+const { splitSections, sectionScore } = require("../src/sim-reply");
 
 test("extractTokens：链接 / wiki / 裸 token / 去重 / 上限 3 篇", () => {
   assert.deepEqual(extractTokens("帮我总结 https://demo.feishu.cn/docx/doccnABC123xyz"), ["doccnABC123xyz"]);

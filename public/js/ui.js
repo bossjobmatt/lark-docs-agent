@@ -10,6 +10,11 @@ export function el(tag, cls) {
   return node;
 }
 
+/** 图片附件对象 → data URL（消息缩略图与附件预览共用） */
+export function dataUrl(im) {
+  return `data:${im.mime};base64,${im.data}`;
+}
+
 /** 工具调用徽标列表（流式与非流式渲染共用） */
 export function toolChipsEl(toolCalls) {
   const tools = el("div", "toolcalls");
@@ -37,7 +42,7 @@ export function renderMessage(m) {
     const strip = el("div", "msg-images");
     for (const im of m.images) {
       const img = document.createElement("img");
-      img.src = `data:${im.mime};base64,${im.data}`;
+      img.src = dataUrl(im);
       img.alt = im.name || "图片";
       strip.appendChild(img);
     }

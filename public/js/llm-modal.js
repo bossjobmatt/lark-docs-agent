@@ -141,6 +141,7 @@ llmFetchBtn.addEventListener("click", async () => {
       return;
     }
     fillModelSelect(models);
+    setModelMode("select"); // 拉取成功即切换为下拉选择（否则 select 一直隐藏，提示与界面不符）
     setLlmMsg(`✓ 已拉取 ${models.length} 个模型，请在下拉列表中选择（或切换手动输入）`, "ok");
   } catch (e) {
     setLlmMsg(`✗ 拉取模型列表失败：${e.message}`, "err");

@@ -40,7 +40,8 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 | `protocol.js` | 事件工厂 + `makeReply` | 流式事件与回复对象的**唯一契约** |
 | `lark.js` | `runLarkCli/runLarkCommand/cliStatus` | lark CLI 纯调用：两步直查检测（① `--version` 退出码 0 判安装 → ② `auth status --json --verify` 按 verified 证据判登录，兼容真实 lark-cli 无 `ok` 字段的输出）；执行面不做子命令限制/命令面适配——`runLarkCli` 信封解析（确定性路径），`runLarkCommand` 原始透传（agent 通用工具）；LARK_CLI 显式指定优先，否则直接执行 PATH 中的 `lark-cli`，不做安装位置兜底；成功永久缓存，失败按 LARK_PROBE_RETRY_MS 短 TTL 重试 |
 | `markdown.js` | `renderMarkdown` | marked + 轻量消毒（去 script/iframe/内联事件） |
-| `images.js` | `normalizeImages/bodyLimit` | 图片附件校验：mime 白名单、数量（3）与解码后大小上限（`IMAGE_MAX_KB`，默认 4096KB）；供 chat 系列路由调用 |
+| `images.js` | `normalizeImages/bodyLimit/toUserContent` | 图片附件校验（mime 白名单、≤3 张、大小上限）与 OpenAI 多模态 content 组装；供 chat 系列路由与 agent 使用 |
+| `sim-reply.js` | `buildSimReply/splitSections/sectionScore` | 模拟模式本地规则回答（含图片识图引导文案）+ 章节切分与相关度打分纯函数（LLM 长文档节选复用） |
 
 前端（`public/`，原生 ES modules，无打包器）：
 
@@ -84,7 +85,7 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 | `SESSIONS_FILE` / `LLM_CONFIG_FILE` | `data/` 下 | **测试用**落盘覆盖 |
 | `SESSION_TTL_DAYS` / `SESSION_MAX_COUNT` / `SESSION_MAX_MESSAGES` | 7 / 100 / 50 | 会话淘汰（显式 0 生效） |
 | `CONTEXT_BUDGET_CHARS` / `DOC_FULL_TEXT_MAX` | 24000 / 8000 | LLM 上下文预算 |
-| `IMAGE_MAX_KB` | 4096 | 单张图片解码后大小上限（前端按 4MB 预校验，服务端为权威） |
+| `IMAGE_MAX_KB` | 4096 | 单张图片解码后大小上限（前端按 4MB 预校验，服务端为权威）；显式 0 生效 = 禁用图片上传 |
 | `AGENT_MODE` | `pi` | 默认 Agent 模式（显式 `builtin` 切回） |
 | `PI_AGENT_DIR` / `PI_PROMPT_TIMEOUT_MS` | `data/pi-agent/` / 120000 | pi 模式 |
 | `LARK_FAIL_RATE` | 0 | 演示 mock 的失败注入 |
