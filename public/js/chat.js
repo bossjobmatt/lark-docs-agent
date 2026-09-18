@@ -38,16 +38,9 @@ export function showWelcome(larkAvailable = true) {
         "<p>你好！我是 <b>Lark 文档助手</b> 🤖</p>" +
         "<p>把 <b>飞书/Lark 文档链接</b> 和你的问题一起发给我，我会调用本地 Lark CLI 读取文档后回答，并支持多轮追问。</p>" +
         larkHint +
-        "<p>试试点击下方的示例文档，或粘贴：<code>https://demo.feishu.cn/docx/doccnABC123xyz</code></p>",
+        "<p>试试粘贴：<code>https://demo.feishu.cn/docx/doccnABC123xyz</code></p>",
     })
   );
-}
-
-/** 示例文档点击：预填输入框并聚焦（由入口模块调用） */
-export function composerPrefill(text) {
-  input.value = text;
-  input.focus();
-  input.dispatchEvent(new Event("input"));
 }
 
 async function handleSend(text) {
