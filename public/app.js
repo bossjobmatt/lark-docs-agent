@@ -1,6 +1,7 @@
 /** 入口：初始化（健康检查 → 历史恢复/欢迎页）。各模块自行注册各自的事件。 */
 import { state } from "./js/state.js";
-import { refresh, showWelcome } from "./js/chat.js";
+import { refresh } from "./js/chat.js";
+import { enterWelcome } from "./js/welcome.js";
 import { refreshHealth } from "./js/health.js";
 import "./js/sessions.js";
 import "./js/llm-modal.js";
@@ -20,5 +21,5 @@ import "./js/llm-modal.js";
     } catch { /* 落到欢迎页 */ }
   }
   const lark = state.lastHealth && state.lastHealth.lark;
-  showWelcome(lark ? lark.available : true);
+  enterWelcome(lark ? lark.available : true);
 })();

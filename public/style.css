@@ -233,6 +233,48 @@ pre.raw-md {
 }
 #send:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* 输入框下方常驻换行提示 */
+.composer-hint {
+  max-width: 828px;
+  margin: 6px auto 0;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  user-select: none;
+}
+
+/* ---------- 欢迎态（新会话）：消息区隐藏，Hero + 输入框整体垂直居中 ---------- */
+body.welcome .chat { display: none; }
+body.welcome .composer-wrap {
+  position: static;
+  margin: auto 0; /* 剩余空间垂直居中 */
+  border-top: none;
+  background: transparent;
+  box-shadow: none;
+}
+/* 欢迎态输入区收窄，与 Hero 对齐，避免空屏上输入框过宽 */
+body.welcome .composer,
+body.welcome .composer-hint { max-width: 640px; }
+
+.welcome-hero { max-width: 640px; margin: 0 auto 20px; text-align: center; }
+.hero-icon { font-size: 40px; line-height: 1; margin-bottom: 12px; }
+.hero-title { margin: 0 0 10px; font-size: 22px; font-weight: 700; }
+.hero-desc { margin: 0 auto; max-width: 560px; font-size: 14px; line-height: 1.7; color: #4b5563; }
+.hero-example { margin: 10px 0 0; font-size: 13px; color: var(--muted); }
+.hero-example code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: #f0f2f5; padding: 1px 5px; border-radius: 4px; }
+.hero-warn {
+  margin: 14px auto 0;
+  max-width: 620px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: #b45309;
+  background: #fff7e8;
+  border: 1px solid #f5dfb8;
+  border-radius: 8px;
+  padding: 8px 12px;
+  text-align: left;
+}
+
 /* ---------- LLM 配置弹窗 ---------- */
 .modal {
   position: fixed;

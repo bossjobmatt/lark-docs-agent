@@ -51,6 +51,7 @@ npm run lark -- doc list   # 直接调用演示 mock CLI
 | `js/api.js` | JSON POST 辅助 |
 | `js/health.js` | 模式徽标与健康检查 |
 | `js/chat.js` | 聊天主界面：消息流管理、发送入口、输入区与清空 |
+| `js/welcome.js` | 欢迎态布局：新会话 Hero+输入框垂直居中（`body.welcome`），会话开始后切回吸底输入（enterWelcome/enterChat） |
 | `js/stream.js` | 流式发送：NDJSON 事件解析、流式增量渲染（稳定前缀+活跃尾行）、生成中止 |
 | `js/sessions.js` | 会话面板（列表/切换/新建/删除） |
 | `js/llm-modal.js` | AI 引擎配置弹窗 |

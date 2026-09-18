@@ -24,11 +24,13 @@
   <main id="chat" class="chat"></main>
 
   <div class="composer-wrap">
+    <div id="welcome-hero" class="welcome-hero hidden"></div>
     <form id="composer" class="composer">
-      <textarea id="input" rows="1"
-        placeholder="输入问题，可附带飞书/Lark 文档链接（Enter 发送，Shift+Enter 换行）"></textarea>
+      <textarea id="input" rows="3"
+        placeholder="输入问题，可附带飞书/Lark 文档链接"></textarea>
       <button id="send" type="submit">发送</button>
     </form>
+    <div class="composer-hint">Enter 发送 · Shift+Enter 换行</div>
   </div>
 
   <div id="llm-modal" class="modal hidden">
